@@ -1,0 +1,55 @@
+#!/usr/bin/env php
+<?php
+
+require_once __DIR__ . '/bootstrap/autoload.php';
+
+use App\Database\DatabaseInstaller;
+
+$command = $argv[1] ?? 'help';
+
+try {
+    switch ($command) {
+        case 'migrate':
+        case 'db:seed':
+        case 'migrate:fresh':
+            $pdo = DatabaseInstaller::connect();
+            if ($command === 'migrate:fresh') {
+                $cfg = DatabaseInstaller::getConnectionConfig();
+                $dbName = preg_replace('/[^a-zA-Z0-9_]/', '', $cfg['database']);
+                $pdo->exec("DROP DATABASE IF EXISTS `{$dbName}`");
+                $pdo->exec("CREATE DATABASE `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+                $pdo->exec("USE `{$dbName}`");
+                echo "[ESMS Artisan] Dropped and recreated database '{$dbName}'.\n";
+            }
+            DatabaseInstaller::ensureInstalled($pdo);
+            echo "[ESMS Artisan] Database schema migrated and initial TZS data seeded successfully.\n";
+            break;
+
+        case 'serve':
+            $host = '127.0.0.1';
+            $port = '8000';
+            foreach ($argv as $arg) {
+                if (str_starts_with($arg, '--port=')) {
+                    $port = substr($arg, 7);
+                }
+                if (str_starts_with($arg, '--host=')) {
+                    $host = substr($arg, 7);
+                }
+            }
+            echo "[ESMS Artisan] Starting Laravel development server on http://{$host}:{$port}\n";
+            passthru(PHP_BINARY . " -S {$host}:{$port} -t " . escapeshellarg(__DIR__ . '/public') . ' ' . escapeshellarg(__DIR__ . '/public/index.php'));
+            break;
+
+        default:
+            echo "ESMS Laravel Artisan CLI\n";
+            echo "Available commands:\n";
+            echo "  php artisan migrate         Create schema and seed initial data if empty\n";
+            echo "  php artisan migrate:fresh   Drop all tables, recreate schema, and seed fresh data\n";
+            echo "  php artisan db:seed         Ensure default roles, permissions, and initial records exist\n";
+            echo "  php artisan serve           Start API server on http://127.0.0.1:8000\n";
+            break;
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, "[ESMS Artisan Error] " . $e->getMessage() . "\n");
+    exit(1);
+}

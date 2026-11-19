@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/vendor/
+
+# Build outputs
+frontend/dist/
+frontend/.vite/
+
+# Local environment & runtime cache
+.env
+backend/.env
+frontend/.env.local
+backend/storage/schema_stamp.json
+
+# User-uploaded media (preserve directory via .gitkeep)
+backend/public/uploads/*
+!backend/public/uploads/.gitkeep
+
+# Logs & OS files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/

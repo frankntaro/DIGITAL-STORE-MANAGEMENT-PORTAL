@@ -1,0 +1,22 @@
+{
+    "name": "electrohub/esms-backend",
+    "type": "project",
+    "description": "Electronics Shop Management System (ESMS) — Laravel REST API Backend",
+    "keywords": ["laravel", "esms", "pos", "inventory", "tanzania", "pwa"],
+    "license": "MIT",
+    "require": {
+        "php": "^8.2",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "App\\Database\\": "database/"
+        }
+    },
+    "Minimum-stability": "stable",
+    "prefer-stable": true
+}
