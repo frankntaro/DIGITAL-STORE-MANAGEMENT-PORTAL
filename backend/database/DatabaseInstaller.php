@@ -7,7 +7,7 @@ use PDOException;
 
 class DatabaseInstaller
 {
-    private const SCHEMA_VERSION = '2026.11.19.perf-v1';
+    private const SCHEMA_VERSION = '2026.11.20.render-tidb-v2';
     private static ?array $cachedConfig = null;
     private static bool $dbJustCreated = false;
 
@@ -190,9 +190,9 @@ class DatabaseInstaller
             }
         }
 
-        // Check if roles table exists
+        // Check if roles table exists (use fetchAll instead of rowCount for full TiDB/PDO compatibility)
         $stmt = $pdo->query("SHOW TABLES LIKE 'roles'");
-        if ($stmt->rowCount() === 0) {
+        if (empty($stmt->fetchAll())) {
             self::executeSchemaFile($pdo, __DIR__ . '/schema.sql');
         }
 
@@ -222,21 +222,30 @@ class DatabaseInstaller
     public static function ensureUpgrades(PDO $pdo): void
     {
         try {
-            // Widen image columns if needed
-            $pdo->exec("ALTER TABLE `products` MODIFY COLUMN `image_url` MEDIUMTEXT NULL");
-            $pdo->exec("ALTER TABLE `shop_settings` MODIFY COLUMN `shop_logo` MEDIUMTEXT NULL");
+            // Widen image columns only if needed (skips slow redundant TiDB DDL on fresh installs)
+            $imgCol = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'image_url'")->fetch();
+            if ($imgCol && !str_contains(strtolower((string) ($imgCol['Type'] ?? '')), 'mediumtext')) {
+                $pdo->exec("ALTER TABLE `products` MODIFY COLUMN `image_url` MEDIUMTEXT NULL");
+            }
+            $logoCol = $pdo->query("SHOW COLUMNS FROM `shop_settings` LIKE 'shop_logo'")->fetch();
+            if ($logoCol && !str_contains(strtolower((string) ($logoCol['Type'] ?? '')), 'mediumtext')) {
+                $pdo->exec("ALTER TABLE `shop_settings` MODIFY COLUMN `shop_logo` MEDIUMTEXT NULL");
+            }
 
             // Support 'pending' purchase order workflow and approval tracking on purchases table
-            $pdo->exec("
-                ALTER TABLE `purchases`
-                MODIFY COLUMN `status` ENUM('pending', 'draft', 'partially_received', 'received', 'cancelled') NOT NULL DEFAULT 'pending'
-            ");
-            $hasApprovedBy = (int) $pdo->query("SHOW COLUMNS FROM `purchases` LIKE 'approved_by'")->rowCount();
-            if ($hasApprovedBy === 0) {
+            $purStatusCol = $pdo->query("SHOW COLUMNS FROM `purchases` LIKE 'status'")->fetch();
+            if ($purStatusCol && !str_contains(strtolower((string) ($purStatusCol['Type'] ?? '')), "'pending'")) {
+                $pdo->exec("
+                    ALTER TABLE `purchases`
+                    MODIFY COLUMN `status` ENUM('pending', 'draft', 'partially_received', 'received', 'cancelled') NOT NULL DEFAULT 'pending'
+                ");
+            }
+            $hasApprovedBy = $pdo->query("SHOW COLUMNS FROM `purchases` LIKE 'approved_by'")->fetchAll();
+            if (empty($hasApprovedBy)) {
                 $pdo->exec("ALTER TABLE `purchases` ADD COLUMN `approved_by` BIGINT UNSIGNED NULL AFTER `recorded_by`");
             }
-            $hasApprovedAt = (int) $pdo->query("SHOW COLUMNS FROM `purchases` LIKE 'approved_at'")->rowCount();
-            if ($hasApprovedAt === 0) {
+            $hasApprovedAt = $pdo->query("SHOW COLUMNS FROM `purchases` LIKE 'approved_at'")->fetchAll();
+            if (empty($hasApprovedAt)) {
                 $pdo->exec("ALTER TABLE `purchases` ADD COLUMN `approved_at` TIMESTAMP NULL AFTER `approved_by`");
             }
 
@@ -342,12 +351,12 @@ class DatabaseInstaller
             }
 
             // Support selling products by meter ('meter') vs piece ('piece') with decimal quantities (e.g. Carpets)
-            $hasProductUnit = (int) $pdo->query("SHOW COLUMNS FROM `products` LIKE 'unit'")->rowCount();
-            if ($hasProductUnit === 0) {
+            $hasProductUnit = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'unit'")->fetchAll();
+            if (empty($hasProductUnit)) {
                 $pdo->exec("ALTER TABLE `products` ADD COLUMN `unit` VARCHAR(20) NOT NULL DEFAULT 'piece' AFTER `weighted_avg_cost`");
             }
-            $hasSaleUnit = (int) $pdo->query("SHOW COLUMNS FROM `sale_items` LIKE 'unit_snapshot'")->rowCount();
-            if ($hasSaleUnit === 0) {
+            $hasSaleUnit = $pdo->query("SHOW COLUMNS FROM `sale_items` LIKE 'unit_snapshot'")->fetchAll();
+            if (empty($hasSaleUnit)) {
                 $pdo->exec("ALTER TABLE `sale_items` ADD COLUMN `unit_snapshot` VARCHAR(20) NOT NULL DEFAULT 'piece' AFTER `sku_snapshot`");
             }
             $invQtyCol = $pdo->query("SHOW COLUMNS FROM `inventories` LIKE 'available_quantity'")->fetch();
@@ -385,7 +394,7 @@ class DatabaseInstaller
             foreach ($indexes as [$tbl, $idxName, $cols]) {
                 $chkIdx = $pdo->prepare("SHOW INDEX FROM `{$tbl}` WHERE Key_name = ?");
                 $chkIdx->execute([$idxName]);
-                if ($chkIdx->rowCount() === 0) {
+                if (empty($chkIdx->fetchAll())) {
                     $pdo->exec("ALTER TABLE `{$tbl}` ADD INDEX `{$idxName}` {$cols}");
                 }
             }
@@ -776,6 +785,7 @@ class DatabaseInstaller
             $siStmt->execute([$sale2Id, $prodIds['PHN-A55-128'], 'Samsung Galaxy A55 5G 128GB', 'PHN-A55-128', 1, 950000.00, 780000.00, 0.00, 950000.00, 780000.00, 170000.00, 12]);
             $si2_1 = (int) $pdo->lastInsertId();
             $warStmt->execute(['WAR-2026-003', $sale2Id, $si2_1, $prodIds['PHN-A55-128'], $cusIds['CUS-002'], 'IMEI-354491008271650', date('Y-m-d', strtotime('-12 days')), 12, date('Y-m-d', strtotime('+12 months -12 days')), 'Samsung East Africa 12M Warranty']);
+            $war3Id = (int) $pdo->lastInsertId();
 
             // Repayment on S-00123 today (150,000 TZS)
             $pdo->prepare("
@@ -784,7 +794,8 @@ class DatabaseInstaller
                     `amount`, `balance_before`, `balance_after`, `payment_method`, `payment_date`, `notes`, `recorded_by`
                 ) VALUES ('cp-uuid-001', 'RP-00041', ?, ?, ?, 150000.00, 450000.00, 300000.00, 'Cash', NOW(), 'Installment repayment received at counter', ?)
             ")->execute([$cusIds['CUS-002'], $sale2Id, $sessionId, $cashierId]);
-            $cmStmt->execute(['cm-uuid-002', $sessionId, 'inflow', 'debt_repayment', 150000.00, 'CustomerPayment', 1, 'Debt repayment RP-00041 (Mary Kileo)', $cashierId]);
+            $cp1Id = (int) $pdo->lastInsertId();
+            $cmStmt->execute(['cm-uuid-002', $sessionId, 'inflow', 'debt_repayment', 150000.00, 'CustomerPayment', $cp1Id, 'Debt repayment RP-00041 (Mary Kileo)', $cashierId]);
 
             // Sale 3: S-00122 — David Kimaro (Partial Credit Sale today: Samsung Galaxy S24 Ultra 3,050,000 TZS, Paid 1,220,000 TZS cash today, Remaining balance 1,830,000 TZS due in 5 days)
             $saleStmt->execute([
@@ -848,16 +859,16 @@ class DatabaseInstaller
                 ) VALUES (?, ?, 1, 'resalable', 1, 0.00, 0.00)
             ")->execute([$retId, $prodIds['ACC-MAG-CASE']]);
 
-            // Warranty Claim sample
+            // Warranty Claim sample (uses actual lastInsertId for TiDB/MySQL AUTO_INCREMENT safety)
             $pdo->prepare("
                 INSERT INTO `warranty_claims` (
                     `claim_number`, `warranty_id`, `claim_date`, `issue_description`,
                     `resolution`, `resolution_notes`, `handled_by`, `resolved_at`
                 ) VALUES (
-                    'WCL-0001', 3, ?, 'Charging port loose connection after 1 week',
+                    'WCL-0001', ?, ?, 'Charging port loose connection after 1 week',
                     'repaired', 'Cleaned and tightened USB-C port assembly under warranty at zero cost to customer', ?, NOW()
                 )
-            ")->execute([date('Y-m-d'), $ownerId]);
+            ")->execute([$war3Id, date('Y-m-d'), $ownerId]);
 
             // 14. Seed Initial Audit Log Entries
             $auditStmt = $pdo->prepare("

@@ -2,6 +2,7 @@ services:
   - type: web
     name: kampango-phones-electronics
     runtime: docker
+    region: frankfurt
     plan: free
     healthCheckPath: /api/health
     envVars:

@@ -410,7 +410,14 @@ class ShopCatalogSeeder
             ['KMP-GRO-014', 'Quider Electronic Item', 'grooming-and-household', 'Quider', 'Standard', 15000, 25000, 15, 5, 6],
         ];
 
-        $findProd = $pdo->prepare("SELECT `id` FROM `products` WHERE `sku` = ? OR LOWER(`name`) = LOWER(?) LIMIT 1");
+        // Preload existing SKUs and names in a single query (avoids 200+ serial round-trips on remote TiDB/MySQL)
+        $existingSkus = [];
+        $existingNames = [];
+        foreach ($pdo->query("SELECT `sku`, `name` FROM `products`")->fetchAll() as $row) {
+            $existingSkus[(string) $row['sku']] = true;
+            $existingNames[strtolower((string) $row['name'])] = true;
+        }
+
         $insProd = $pdo->prepare("
             INSERT INTO `products` (
                 `sku`, `barcode`, `name`, `category_id`, `brand`, `model`, `description`,
@@ -423,26 +430,46 @@ class ShopCatalogSeeder
             VALUES (?, ?, ?, NOW())
         ");
 
-        foreach ($products as $idx => $p) {
-            [$sku, $name, $catSlug, $brand, $model, $cost, $sell, $qty, $minStock, $warranty] = $p;
-            if (!isset($catIds[$catSlug])) {
-                continue;
-            }
-            $findProd->execute([$sku, $name]);
-            if ((int) $findProd->fetchColumn() > 0) {
-                continue;
-            }
-            $barcode = sprintf('890200%06d', $idx + 1);
-            $img = $catImages[$catSlug] ?? $catImages['mobile-phones'];
-            $desc = "{$brand} {$name} — KAMPANGO PHONES AND ELECTRONICS";
-            $unit = (str_contains(strtolower($name), 'carpet') || str_contains(strtolower($name), 'zulia')) ? 'meter' : 'piece';
+        $startedTx = false;
+        if (!$pdo->inTransaction()) {
+            $pdo->beginTransaction();
+            $startedTx = true;
+        }
 
-            $insProd->execute([
-                $sku, $barcode, $name, $catIds[$catSlug], $brand, $model, $desc,
-                $cost, $sell, $cost, $unit, $minStock, $warranty, $img, $ownerId
-            ]);
-            $pid = (int) $pdo->lastInsertId();
-            $insInv->execute([$pid, $qty, $cost]);
+        try {
+            foreach ($products as $idx => $p) {
+                [$sku, $name, $catSlug, $brand, $model, $cost, $sell, $qty, $minStock, $warranty] = $p;
+                if (!isset($catIds[$catSlug])) {
+                    continue;
+                }
+                $lowerName = strtolower($name);
+                if (isset($existingSkus[$sku]) || isset($existingNames[$lowerName])) {
+                    continue;
+                }
+                $barcode = sprintf('890200%06d', $idx + 1);
+                $img = $catImages[$catSlug] ?? $catImages['mobile-phones'];
+                $desc = "{$brand} {$name} — KAMPANGO PHONES AND ELECTRONICS";
+                $unit = (str_contains($lowerName, 'carpet') || str_contains($lowerName, 'zulia')) ? 'meter' : 'piece';
+
+                $insProd->execute([
+                    $sku, $barcode, $name, $catIds[$catSlug], $brand, $model, $desc,
+                    $cost, $sell, $cost, $unit, $minStock, $warranty, $img, $ownerId
+                ]);
+                $pid = (int) $pdo->lastInsertId();
+                $insInv->execute([$pid, $qty, $cost]);
+
+                $existingSkus[$sku] = true;
+                $existingNames[$lowerName] = true;
+            }
+
+            if ($startedTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($startedTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
         }
     }
 }

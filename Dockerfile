@@ -26,7 +26,7 @@ RUN { \
       echo "upload_max_filesize=20M"; \
       echo "post_max_size=25M"; \
       echo "memory_limit=256M"; \
-      echo "max_execution_time=60"; \
+      echo "max_execution_time=180"; \
       echo "expose_php=Off"; \
     } > /usr/local/etc/php/conf.d/kampango.ini
 

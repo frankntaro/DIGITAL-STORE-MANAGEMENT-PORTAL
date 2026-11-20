@@ -9,25 +9,33 @@ use App\Http\Controllers\Api\OperationsSyncController;
 use App\Http\Controllers\Api\PosCustomerDebtController;
 use App\Services\AuthService;
 
-$pdo = DatabaseInstaller::connect();
-DatabaseInstaller::ensureInstalled($pdo);
-
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 $path = '/' . trim(preg_replace('#^/api#', '', $uri), '/');
 
-// Public Health & Login Endpoints
+// Fast Public Health Endpoint (responds immediately for Render/Koyeb health probes & uptime monitors)
 if ($method === 'GET' && ($path === '/' || $path === '/health')) {
+    $cfg = DatabaseInstaller::getConnectionConfig();
+    $payload = [
+        'success'       => true,
+        'status'        => 'ok',
+        'app'           => 'KAMPANGO PHONES AND ELECTRONICS — Digital Store Management Portal API',
+        'version'       => '1.0.0',
+        'db_configured' => !empty($cfg['host']) && !empty($cfg['database']),
+        'currency'      => 'TZS',
+    ];
+    if (($_GET['db'] ?? '') === '1') {
+        $pdoCheck = DatabaseInstaller::connect();
+        DatabaseInstaller::ensureInstalled($pdoCheck);
+        $payload['database_ready'] = true;
+    }
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode([
-        'success'  => true,
-        'app'      => 'Electronics Shop Management System (ESMS) Laravel API',
-        'version'  => '1.0.0',
-        'database' => 'MySQL (esms_db)',
-        'currency' => 'TZS',
-    ]);
+    echo json_encode($payload);
     exit;
 }
+
+$pdo = DatabaseInstaller::connect();
+DatabaseInstaller::ensureInstalled($pdo);
 
 if ($method === 'POST' && $path === '/auth/login') {
     AuthController::login($pdo);
