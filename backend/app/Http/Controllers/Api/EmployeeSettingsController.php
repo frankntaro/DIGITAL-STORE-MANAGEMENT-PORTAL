@@ -314,7 +314,10 @@ class EmployeeSettingsController extends BaseApiController
             self::error('Failed to prepare uploads directory on server.', 500);
         }
 
-        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+            || (int) ($_SERVER['SERVER_PORT'] ?? 0) === 443;
+        $scheme = $isHttps ? 'https' : 'http';
         $host = $_SERVER['HTTP_HOST'] ?? '127.0.0.1:8000';
         $baseUrl = "{$scheme}://{$host}";
 
@@ -357,9 +360,10 @@ class EmployeeSettingsController extends BaseApiController
                 if (move_uploaded_file($tmpName, $targetPath)) {
                     $relPath = '/uploads/' . $filename . '.' . $ext;
                     self::json([
-                        'success' => true,
-                        'path'    => $relPath,
-                        'url'     => $baseUrl . $relPath,
+                        'success'      => true,
+                        'path'         => $relPath,
+                        'url'          => $relPath,
+                        'absolute_url' => $baseUrl . $relPath,
                     ]);
                 }
                 self::error('Failed to save uploaded image on server.', 500);
@@ -392,9 +396,10 @@ class EmployeeSettingsController extends BaseApiController
                 if (@file_put_contents($targetPath, $decoded) !== false) {
                     $relPath = '/uploads/' . $filename . '.' . $ext;
                     self::json([
-                        'success' => true,
-                        'path'    => $relPath,
-                        'url'     => $baseUrl . $relPath,
+                        'success'      => true,
+                        'path'         => $relPath,
+                        'url'          => $relPath,
+                        'absolute_url' => $baseUrl . $relPath,
                     ]);
                 }
                 self::error('Failed to write image file on server.', 500);

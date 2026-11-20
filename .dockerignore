@@ -1,0 +1,11 @@
+.git
+.gitignore
+.vscode
+frontend/node_modules
+frontend/dist
+backend/.env
+backend/storage/schema_stamp.json
+backend/public/uploads/*
+!backend/public/uploads/.gitkeep
+*.log
+start_esms.bat

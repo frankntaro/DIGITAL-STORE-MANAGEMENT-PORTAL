@@ -11,6 +11,26 @@ class DatabaseInstaller
     private static ?array $cachedConfig = null;
     private static bool $dbJustCreated = false;
 
+    private static function envVal(array $dotEnv, array $keys, string $default = ''): string
+    {
+        foreach ($keys as $k) {
+            $v = getenv($k);
+            if ($v !== false && $v !== '') {
+                return trim((string) $v);
+            }
+            if (isset($_ENV[$k]) && $_ENV[$k] !== '') {
+                return trim((string) $_ENV[$k]);
+            }
+            if (isset($_SERVER[$k]) && $_SERVER[$k] !== '') {
+                return trim((string) $_SERVER[$k]);
+            }
+            if (isset($dotEnv[$k]) && $dotEnv[$k] !== '') {
+                return trim((string) $dotEnv[$k]);
+            }
+        }
+        return $default;
+    }
+
     public static function getConnectionConfig(): array
     {
         if (self::$cachedConfig !== null) {
@@ -33,27 +53,77 @@ class DatabaseInstaller
             }
         }
 
+        // Optional single DATABASE_URL / MYSQL_URL support (Render / Railway / TiDB)
+        $urlStr = self::envVal($env, ['MYSQL_URL', 'DATABASE_URL']);
+        $urlParts = $urlStr !== '' ? parse_url($urlStr) : false;
+
+        $host = self::envVal($env, ['DB_HOST', 'MYSQLHOST'], is_array($urlParts) && !empty($urlParts['host']) ? (string) $urlParts['host'] : '127.0.0.1');
+        $port = self::envVal($env, ['DB_PORT', 'MYSQLPORT'], is_array($urlParts) && !empty($urlParts['port']) ? (string) $urlParts['port'] : '3306');
+        $database = self::envVal($env, ['DB_DATABASE', 'DB_NAME', 'MYSQLDATABASE'], is_array($urlParts) && !empty($urlParts['path']) ? ltrim((string) $urlParts['path'], '/') : 'esms_db');
+        $username = self::envVal($env, ['DB_USERNAME', 'DB_USER', 'MYSQLUSER'], is_array($urlParts) && !empty($urlParts['user']) ? rawurldecode((string) $urlParts['user']) : 'root');
+        $password = self::envVal($env, ['DB_PASSWORD', 'DB_PASS', 'MYSQLPASSWORD'], is_array($urlParts) && isset($urlParts['pass']) ? rawurldecode((string) $urlParts['pass']) : '');
+
+        $sslRaw = strtolower(self::envVal($env, ['DB_SSL'], ''));
+        $isTiDb = str_contains(strtolower($host), 'tidbcloud.com') || $port === '4000';
+        $useSsl = in_array($sslRaw, ['1', 'true', 'yes', 'required', 'verify_ca'], true) || ($sslRaw === '' && $isTiDb);
+        $sslCa = self::envVal($env, ['DB_SSL_CA'], '');
+
         self::$cachedConfig = [
-            'driver'   => $env['DB_CONNECTION'] ?? 'mysql',
-            'host'     => $env['DB_HOST'] ?? '127.0.0.1',
-            'port'     => $env['DB_PORT'] ?? '3306',
-            'database' => $env['DB_DATABASE'] ?? 'esms_db',
-            'username' => $env['DB_USERNAME'] ?? 'root',
-            'password' => $env['DB_PASSWORD'] ?? '',
+            'driver'   => self::envVal($env, ['DB_CONNECTION'], 'mysql'),
+            'host'     => $host,
+            'port'     => $port,
+            'database' => $database,
+            'username' => $username,
+            'password' => $password,
+            'ssl'      => $useSsl,
+            'ssl_ca'   => $sslCa,
         ];
         return self::$cachedConfig;
+    }
+
+    private static function buildPdoOptions(array $cfg, bool $allowPersistent = true): array
+    {
+        $isLocal = in_array(strtolower((string) $cfg['host']), ['127.0.0.1', 'localhost', '::1'], true);
+        $options = [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES   => false,
+            PDO::ATTR_TIMEOUT            => 10,
+        ];
+        if ($allowPersistent && $isLocal) {
+            $options[PDO::ATTR_PERSISTENT] = true;
+        }
+        if (!empty($cfg['ssl'])) {
+            $caCandidates = array_filter([
+                $cfg['ssl_ca'] ?? '',
+                '/etc/ssl/certs/ca-certificates.crt',
+                '/etc/pki/tls/certs/ca-bundle.crt',
+                '/etc/ssl/cert.pem',
+            ]);
+            $caPath = null;
+            foreach ($caCandidates as $candidate) {
+                if (is_file($candidate)) {
+                    $caPath = $candidate;
+                    break;
+                }
+            }
+            if ($caPath !== null && defined('PDO::MYSQL_ATTR_SSL_CA')) {
+                $options[PDO::MYSQL_ATTR_SSL_CA] = $caPath;
+                if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+                    $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+                }
+            } elseif (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+                $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+            }
+        }
+        return $options;
     }
 
     public static function connect(): PDO
     {
         $cfg = self::getConnectionConfig();
         $dbName = preg_replace('/[^a-zA-Z0-9_]/', '', $cfg['database']);
-        $options = [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-            PDO::ATTR_PERSISTENT         => true,
-        ];
+        $options = self::buildPdoOptions($cfg, true);
 
         // Fast path: connect directly to the target database without running CREATE DATABASE / USE on every request
         try {
@@ -67,16 +137,33 @@ class DatabaseInstaller
         }
 
         $dsnNoDb = "mysql:host={$cfg['host']};port={$cfg['port']};charset=utf8mb4";
-        $pdo = new PDO($dsnNoDb, $cfg['username'], $cfg['password'], [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-        ]);
+        $pdo = new PDO($dsnNoDb, $cfg['username'], $cfg['password'], self::buildPdoOptions($cfg, false));
         $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         $pdo->exec("USE `{$dbName}`");
         self::$dbJustCreated = true;
 
         return $pdo;
+    }
+
+    private static function executeSchemaFile(PDO $pdo, string $filePath): void
+    {
+        $rawSql = (string) file_get_contents($filePath);
+        // Strip single-line SQL comments safely before splitting statements for MySQL & TiDB Cloud compatibility
+        $lines = preg_split('/\R/', $rawSql) ?: [];
+        $cleanLines = [];
+        foreach ($lines as $line) {
+            if (preg_match('/^\s*--/', $line)) {
+                continue;
+            }
+            $cleanLines[] = $line;
+        }
+        $cleanSql = implode("\n", $cleanLines);
+        $statements = array_filter(array_map('trim', explode(';', $cleanSql)));
+        foreach ($statements as $statement) {
+            if ($statement !== '') {
+                $pdo->exec($statement);
+            }
+        }
     }
 
     private static function stampPath(): string
@@ -88,6 +175,7 @@ class DatabaseInstaller
     {
         $cfg = self::getConnectionConfig();
         $dbName = preg_replace('/[^a-zA-Z0-9_]/', '', $cfg['database']);
+        $stampKey = $cfg['host'] . ':' . $cfg['port'] . '/' . $dbName;
         $stampFile = self::stampPath();
 
         // Fast path: skip heavy DDL/seeder checks once this schema version has already been applied
@@ -96,7 +184,7 @@ class DatabaseInstaller
             if (
                 is_array($stamp)
                 && ($stamp['version'] ?? '') === self::SCHEMA_VERSION
-                && ($stamp['database'] ?? '') === $dbName
+                && ($stamp['target'] ?? '') === $stampKey
             ) {
                 return;
             }
@@ -105,8 +193,7 @@ class DatabaseInstaller
         // Check if roles table exists
         $stmt = $pdo->query("SHOW TABLES LIKE 'roles'");
         if ($stmt->rowCount() === 0) {
-            $schemaSql = file_get_contents(__DIR__ . '/schema.sql');
-            $pdo->exec($schemaSql);
+            self::executeSchemaFile($pdo, __DIR__ . '/schema.sql');
         }
 
         // Check if seeded
@@ -126,6 +213,7 @@ class DatabaseInstaller
         @file_put_contents($stampFile, json_encode([
             'version'    => self::SCHEMA_VERSION,
             'database'   => $dbName,
+            'target'     => $stampKey,
             'applied_at' => date('c'),
         ], JSON_PRETTY_PRINT));
         self::$dbJustCreated = false;
