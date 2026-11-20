@@ -122,7 +122,7 @@ class DatabaseInstaller
     public static function connect(): PDO
     {
         $cfg = self::getConnectionConfig();
-        $dbName = preg_replace('/[^a-zA-Z0-9_]/', '', $cfg['database']);
+        $dbName = preg_replace('/[^a-zA-Z0-9_-]/', '', $cfg['database']);
         $options = self::buildPdoOptions($cfg, true);
 
         // Fast path: connect directly to the target database without running CREATE DATABASE / USE on every request
@@ -174,7 +174,7 @@ class DatabaseInstaller
     public static function ensureInstalled(PDO $pdo): void
     {
         $cfg = self::getConnectionConfig();
-        $dbName = preg_replace('/[^a-zA-Z0-9_]/', '', $cfg['database']);
+        $dbName = preg_replace('/[^a-zA-Z0-9_-]/', '', $cfg['database']);
         $stampKey = $cfg['host'] . ':' . $cfg['port'] . '/' . $dbName;
         $stampFile = self::stampPath();
 
