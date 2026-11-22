@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useLanguage } from '../utils/i18n';
 import {
+  Check,
+  Copy,
   Download,
   Eye,
   EyeOff,
@@ -8,10 +10,13 @@ import {
   KeyRound,
   Lock,
   LogOut,
+  Mail,
+  MessageCircle,
   Monitor,
   Printer,
   RefreshCw,
   RotateCcw,
+  Share2,
   Shield,
   ShieldCheck,
   Trash2,
@@ -19,6 +24,7 @@ import {
   UserCog,
   UserPlus,
   Wallet,
+  X,
 } from 'lucide-react';
 import { apiRequest, synchronizeOfflineQueue } from '../services/api';
 import { clearSyncedFromQueue, getOfflineQueue } from '../services/offlineDb';
@@ -976,7 +982,82 @@ export function ReturnsWarrantyScreen() {
 // ============================================================================
 // SCREEN 22: REPORTS & ANALYTICS (AT-19, AT-20)
 // ============================================================================
-export function ReportsScreen({ user }) {
+function buildShareableReportText({
+  settings,
+  startDate,
+  endDate,
+  tab,
+  summary,
+  byProduct,
+  byCategory,
+  byEmployee,
+  financialsPermitted,
+  t,
+}) {
+  const shopName = settings?.shop_name || 'KAMPANGO PHONES AND ELECTRONICS';
+  const tabLabels = {
+    sales: t('Sales & Products'),
+    inventory: t('Inventory & Valuation'),
+    employees: t('Sales by Employee'),
+    finance: t('Financial P&L Statement'),
+  };
+  const lines = [
+    `${shopName}`,
+    `${t('BUSINESS & FINANCIAL REPORT')} — ${tabLabels[tab] || t('Reports & Financial Analytics')}`,
+    t('Period: {start} to {end}', { start: startDate, end: endDate }),
+    '----------------------------------------',
+    `${t('Net Sales Revenue')}: ${formatTZS(summary.sales_revenue)}`,
+    `${t('Total Cash Collected')}: ${formatTZS(summary.cash_collected)}`,
+    `${t('Accounts Receivable (AR)')}: ${formatTZS(summary.accounts_receivable)}`,
+    `${t('Inventory Cost Value')}: ${formatTZS(summary.inventory_cost_value)}`,
+    `${t('Accounts Payable (Supplier Balances)')}: ${formatTZS(summary.accounts_payable)}`,
+  ];
+
+  if (financialsPermitted) {
+    lines.push(
+      '----------------------------------------',
+      t('Financial P&L Summary'),
+      `${t('Gross Sales:')} ${formatTZS(summary.gross_sales)}`,
+      `${t('Less: Authorized Discounts:')} -${formatTZS(summary.total_discounts)}`,
+      `${t('Cost of Goods Sold (COGS)')}: -${formatTZS(summary.cogs)}`,
+      `${t('Gross Profit')}: ${formatTZS(summary.gross_profit)}`,
+      `${t('Operating Expenses')}: -${formatTZS(summary.operating_expenses)}`,
+      `${t('Net Profit')}: ${formatTZS(summary.net_profit)}`
+    );
+  }
+
+  if (tab === 'sales' && byProduct.length > 0) {
+    lines.push('----------------------------------------', t('Top Products Sold'));
+    byProduct.slice(0, 10).forEach((p, idx) => {
+      const profitPart = financialsPermitted ? ` | ${t('Gross Profit')}: ${formatTZS(p.profit)}` : '';
+      lines.push(`${idx + 1}. ${p.name} — ${p.units_sold} × | ${formatTZS(p.revenue)}${profitPart}`);
+    });
+    if (byProduct.length > 10) {
+      lines.push(t('...and {count} more item(s)', { count: byProduct.length - 10 }));
+    }
+  } else if (tab === 'inventory' && byCategory.length > 0) {
+    lines.push('----------------------------------------', t('Sales by Category'));
+    byCategory.slice(0, 10).forEach((c, idx) => {
+      lines.push(`${idx + 1}. ${t(c.category_name)} — ${c.units_sold} | ${formatTZS(c.revenue)}`);
+    });
+  } else if (tab === 'employees' && byEmployee.length > 0) {
+    lines.push('----------------------------------------', t('Sales by Employee'));
+    byEmployee.slice(0, 10).forEach((e, idx) => {
+      lines.push(
+        `${idx + 1}. ${e.full_name} (${e.employee_code}) — ${e.transactions_count} | ${formatTZS(e.revenue)} (${t('Cash Collected')}: ${formatTZS(e.cash_collected)})`
+      );
+    });
+  }
+
+  lines.push(
+    '----------------------------------------',
+    `${t('Generated on')}: ${formatDate(new Date().toISOString(), true)}`,
+    'DIGITAL STORE MANAGEMENT PORTAL'
+  );
+  return lines.join('\n');
+}
+
+export function ReportsScreen({ user, settings }) {
   const { t } = useLanguage();
   const [data, setData] = useState(null);
   const [startDate, setStartDate] = useState(
@@ -985,6 +1066,9 @@ export function ReportsScreen({ user }) {
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [tab, setTab] = useState('sales');
   const [error, setError] = useState(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState('');
+  const [copiedReport, setCopiedReport] = useState(false);
 
   const loadReports = async (reportType = 'overview') => {
     setError(null);
@@ -1010,6 +1094,73 @@ export function ReportsScreen({ user }) {
   const byCategoryPg = usePagination(byCategory, 5, `${startDate}|${endDate}`);
   const byEmployeePg = usePagination(byEmployee, 5, `${startDate}|${endDate}`);
 
+  const shareReportTitle = t(
+    'KAMPANGO PHONES AND ELECTRONICS — Financial & Operational Report ({start} to {end})',
+    { start: startDate, end: endDate }
+  );
+  const shareReportText = buildShareableReportText({
+    settings,
+    startDate,
+    endDate,
+    tab,
+    summary,
+    byProduct,
+    byCategory,
+    byEmployee,
+    financialsPermitted: Boolean(data?.financials_permitted),
+    t,
+  });
+
+  const handleCopyReportText = async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareReportText);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = shareReportText;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopiedReport(true);
+      setShareFeedback(t('Report summary copied to clipboard!'));
+      setTimeout(() => {
+        setCopiedReport(false);
+        setShareFeedback('');
+      }, 3000);
+    } catch {
+      setShareFeedback(t('Could not copy report automatically. Please select and copy the text below.'));
+    }
+  };
+
+  const handleNativeShareReport = async () => {
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: shareReportTitle,
+          text: shareReportText,
+        });
+        setShareFeedback(t('Report shared successfully!'));
+        setTimeout(() => setShareFeedback(''), 3000);
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+    await handleCopyReportText();
+  };
+
+  const handleWhatsAppShareReport = () => {
+    const url = `https://wa.me/?text=${encodeURIComponent(shareReportText)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleEmailShareReport = () => {
+    const mailto = `mailto:?subject=${encodeURIComponent(shareReportTitle)}&body=${encodeURIComponent(shareReportText)}`;
+    window.location.href = mailto;
+  };
+
   const handleExportExcel = () => {
     exportToCsv(`KAMPANGO_Product_Sales_${startDate}_to_${endDate}.csv`, byProduct, [
       { label: t('SKU'), accessor: 'sku' },
@@ -1025,7 +1176,7 @@ export function ReportsScreen({ user }) {
 
   const handleExportPdf = () => {
     printHtmlDocument(
-      t('KAMPANGO PHONES AND ELECTRONICS — Financial & Operational Report ({start} to {end})', { start: startDate, end: endDate }),
+      shareReportTitle,
       `
       <div class="header">
         <h2>${t('BUSINESS & FINANCIAL REPORT')}</h2>
@@ -1035,6 +1186,9 @@ export function ReportsScreen({ user }) {
         <tr><th>${t('Sales Revenue (Net of Discounts)')}</th><td class="text-right"><strong>${formatTZS(
           summary.sales_revenue
         )}</strong></td></tr>
+        ${
+          data?.financials_permitted
+            ? `
         <tr><th>${t('Cost of Goods Sold (COGS)')}</th><td class="text-right">${formatTZS(summary.cogs)}</td></tr>
         <tr><th>${t('Gross Profit')}</th><td class="text-right"><strong>${formatTZS(
           summary.gross_profit
@@ -1044,7 +1198,9 @@ export function ReportsScreen({ user }) {
         )}</td></tr>
         <tr><th>${t('Net Profit')}</th><td class="text-right"><strong>${formatTZS(
           summary.net_profit
-        )}</strong></td></tr>
+        )}</strong></td></tr>`
+            : ''
+        }
         <tr><th>${t('Cash Collected (Sales + Debt Repayments)')}</th><td class="text-right">${formatTZS(
           summary.cash_collected
         )}</td></tr>
@@ -1065,7 +1221,7 @@ export function ReportsScreen({ user }) {
         <div>
           <h1 className="text-xl font-extrabold text-slate-900">{t('Reports & Financial Analytics')}</h1>
           <p className="text-xs text-slate-500">
-            {t('Sales, Inventory, Customer, Supplier, and P&L statements with PDF & Excel export')}
+            {t('Sales, Inventory, Customer, Supplier, and P&L statements with PDF, Excel & instant sharing')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1085,8 +1241,19 @@ export function ReportsScreen({ user }) {
           />
           <button
             type="button"
+            onClick={() => {
+              setShareFeedback('');
+              setShowShareModal(true);
+            }}
+            disabled={!data}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm transition"
+          >
+            <Share2 className="w-3.5 h-3.5" /> {t('Share Report')}
+          </button>
+          <button
+            type="button"
             onClick={handleExportPdf}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-bold"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold"
           >
             <Printer className="w-3.5 h-3.5" /> {t('Export PDF')}
           </button>
@@ -1099,6 +1266,92 @@ export function ReportsScreen({ user }) {
           </button>
         </div>
       </div>
+
+      {/* Share Report Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                  <Share2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">{t('Share Report')}</h3>
+                  <p className="text-xs text-slate-500">
+                    {t('Period: {start} to {end}', { start: startDate, end: endDate })}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label={t('Close')}
+                onClick={() => setShowShareModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {shareFeedback && (
+              <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+                {shareFeedback}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1.5">
+                {t('Report Summary Preview')}
+              </label>
+              <textarea
+                readOnly
+                rows={10}
+                value={shareReportText}
+                className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 text-[11px] font-mono text-slate-800 resize-none focus:outline-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={handleWhatsAppShareReport}
+                className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition"
+              >
+                <MessageCircle className="w-3.5 h-3.5 shrink-0" /> {t('WhatsApp')}
+              </button>
+              <button
+                type="button"
+                onClick={handleNativeShareReport}
+                className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition"
+              >
+                <Share2 className="w-3.5 h-3.5 shrink-0" /> {t('Share')}
+              </button>
+              <button
+                type="button"
+                onClick={handleEmailShareReport}
+                className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition"
+              >
+                <Mail className="w-3.5 h-3.5 shrink-0" /> {t('Email')}
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyReportText}
+                className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition"
+              >
+                {copiedReport ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 shrink-0" /> {t('Copied!')}
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 shrink-0" /> {t('Copy')}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Report Tabs (Matches Screen 22 Mockup) */}
       <div className="flex gap-2 border-b border-slate-200">
@@ -1293,7 +1546,7 @@ export function ReportsScreen({ user }) {
 // ============================================================================
 // SCREEN 23: EMPLOYEES, GRANULAR PERMISSIONS & AUDIT LOGS
 // ============================================================================
-export function EmployeesPermissionsScreen() {
+export function EmployeesPermissionsScreen({ currentUser, onUserUpdated }) {
   const { t } = useLanguage();
   const [employees, setEmployees] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -1302,8 +1555,12 @@ export function EmployeesPermissionsScreen() {
   const [tab, setTab] = useState('employees');
   const [selectedEmp, setSelectedEmp] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [resetPasswordEmp, setResetPasswordEmp] = useState(null);
-  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [credentialsEmp, setCredentialsEmp] = useState(null);
+  const [credUsernameInput, setCredUsernameInput] = useState('');
+  const [credPasswordInput, setCredPasswordInput] = useState('');
+  const [showCredPassword, setShowCredPassword] = useState(true);
+  const [savingCreds, setSavingCreds] = useState(false);
+  const [credError, setCredError] = useState('');
   const [newEmp, setNewEmp] = useState({
     full_name: '',
     username: '',
@@ -1396,20 +1653,58 @@ export function EmployeesPermissionsScreen() {
     }
   };
 
-  const handleResetPassword = async (e) => {
+  const openCredentialsModal = (emp) => {
+    setCredentialsEmp(emp);
+    setCredUsernameInput(emp.username || '');
+    setCredPasswordInput('');
+    setShowCredPassword(true);
+    setCredError('');
+  };
+
+  const handleSaveCredentials = async (e) => {
     e.preventDefault();
-    if (!resetPasswordEmp) return;
+    if (!credentialsEmp) return;
+    setCredError('');
+
+    const trimmedUsername = credUsernameInput.trim();
+    const trimmedPassword = credPasswordInput.trim();
+    const usernameChanged = trimmedUsername !== (credentialsEmp.username || '');
+    const passwordChanged = trimmedPassword !== '';
+
+    if (trimmedUsername.length < 3 || /\s/.test(trimmedUsername)) {
+      setCredError(t('Username must be at least 3 characters with no spaces.'));
+      return;
+    }
+    if (!usernameChanged && !passwordChanged) {
+      setCredError(t('Please enter a new username or a new password (minimum 6 characters).'));
+      return;
+    }
+    if (passwordChanged && trimmedPassword.length < 6) {
+      setCredError(t('New password must be at least 6 characters long.'));
+      return;
+    }
+
+    setSavingCreds(true);
     try {
-      const res = await apiRequest(`/employees/${resetPasswordEmp.id}/reset-password`, {
+      const res = await apiRequest(`/employees/${credentialsEmp.id}/reset-password`, {
         method: 'POST',
-        body: JSON.stringify({ password: newPasswordInput }),
+        body: JSON.stringify({
+          username: trimmedUsername,
+          password: trimmedPassword,
+        }),
       });
       setMessage({ type: 'success', text: res.message });
-      setResetPasswordEmp(null);
-      setNewPasswordInput('');
+      if (res.employee && currentUser && Number(res.employee.id) === Number(currentUser.id)) {
+        onUserUpdated?.(res.employee);
+      }
+      setCredentialsEmp(null);
+      setCredUsernameInput('');
+      setCredPasswordInput('');
       loadData();
     } catch (err) {
-      setMessage({ type: 'error', text: err.message });
+      setCredError(t(err.message));
+    } finally {
+      setSavingCreds(false);
     }
   };
 
@@ -1440,7 +1735,7 @@ export function EmployeesPermissionsScreen() {
             {t('Employees, Roles & Access Control (RBAC)')}
           </h1>
           <p className="text-xs text-slate-500">
-            {t('Register new staff, delete accounts, reset passwords, and configure unified employee permissions')}
+            {t('Register new staff, edit usernames & reset passwords, delete accounts, and configure employee permissions')}
           </p>
         </div>
         <button
@@ -1461,40 +1756,91 @@ export function EmployeesPermissionsScreen() {
         </div>
       )}
 
-      {/* Reset Password Modal */}
-      {resetPasswordEmp && (
+      {/* Edit Username & Reset Password Modal */}
+      {credentialsEmp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
-                <KeyRound className="w-5 h-5" />
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {t('Edit Username & Reset Password')}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    @{credentialsEmp.username} · {credentialsEmp.full_name} ({credentialsEmp.employee_code})
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">{t('Reset Employee Password')}</h3>
-                <p className="text-xs text-slate-500">
-                  @{resetPasswordEmp.username} · {resetPasswordEmp.full_name}
-                </p>
-              </div>
+              <button
+                type="button"
+                aria-label={t('Close')}
+                onClick={() => setCredentialsEmp(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <form onSubmit={handleResetPassword} className="space-y-4">
+
+            {credError && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+                {credError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveCredentials} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t('New Password (minimum 6 characters)')}
+                <label htmlFor="emp-edit-username" className="block text-xs font-semibold text-slate-700 mb-1">
+                  {t('Login Username')} <span className="text-red-500">*</span>
                 </label>
                 <input
+                  id="emp-edit-username"
                   type="text"
                   required
-                  minLength={6}
-                  value={newPasswordInput}
-                  onChange={(e) => setNewPasswordInput(e.target.value)}
-                  placeholder={t('Enter new password')}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-mono"
+                  minLength={3}
+                  value={credUsernameInput}
+                  onChange={(e) => setCredUsernameInput(e.target.value)}
+                  placeholder={t('Enter login username')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold"
                 />
               </div>
-              <div className="flex items-center justify-between pt-2">
+
+              <div>
+                <label htmlFor="emp-edit-password" className="block text-xs font-semibold text-slate-700 mb-1">
+                  {t('New Password (Optional — minimum 6 characters)')}
+                </label>
+                <div className="relative">
+                  <input
+                    id="emp-edit-password"
+                    type={showCredPassword ? 'text' : 'password'}
+                    value={credPasswordInput}
+                    onChange={(e) => setCredPasswordInput(e.target.value)}
+                    placeholder={t('Leave blank to keep current password')}
+                    className="w-full pl-3.5 pr-9 py-2.5 rounded-xl border border-slate-300 text-xs font-mono"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showCredPassword ? t('Hide password') : t('Show password')}
+                    onClick={() => setShowCredPassword((v) => !v)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                  >
+                    {showCredPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  {t('Update username only, reset password only, or save both at once. Resetting the password signs out the account on other devices.')}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setNewPasswordInput('Kampango' + Math.floor(1000 + Math.random() * 9000))}
+                  onClick={() => {
+                    setCredPasswordInput('Kampango' + Math.floor(1000 + Math.random() * 9000));
+                    setShowCredPassword(true);
+                  }}
                   className="text-xs text-blue-600 font-bold hover:underline"
                 >
                   {t('Generate Password')}
@@ -1502,16 +1848,17 @@ export function EmployeesPermissionsScreen() {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => setResetPasswordEmp(null)}
+                    onClick={() => setCredentialsEmp(null)}
                     className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     {t('Cancel')}
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold"
+                    disabled={savingCreds}
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-xs font-bold"
                   >
-                    {t('Save New Password')}
+                    {savingCreds ? t('Saving...') : t('Save Credentials')}
                   </button>
                 </div>
               </div>
@@ -1661,14 +2008,12 @@ export function EmployeesPermissionsScreen() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            setResetPasswordEmp(emp);
-                            setNewPasswordInput('Pass1234!');
-                          }}
-                          title={t('Reset Employee Password')}
-                          className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition"
+                          onClick={() => openCredentialsModal(emp)}
+                          title={t('Edit Username & Reset Password')}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold text-[11px] transition"
                         >
                           <KeyRound className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">{t('Credentials')}</span>
                         </button>
                         {!(emp.role_slugs || []).includes('owner') && (
                           <button
@@ -1783,13 +2128,18 @@ export function SettingsScreen({
 }) {
   const { t } = useLanguage();
   const isAdmin = (user?.role_slugs || []).includes('owner');
+  const canManageShopSettings = hasPermission(user, 'settings.manage');
+  const normalizeTab = (requested) => {
+    const normalized = requested === 'admin_account' ? 'account' : requested || 'general';
+    return canManageShopSettings ? normalized : 'account';
+  };
   const [form, setForm] = useState(initialSettings || {});
-  const [tab, setTab] = useState(initialTab || 'general');
+  const [tab, setTab] = useState(() => normalizeTab(initialTab));
   const [queue, setQueue] = useState([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
 
-  // Admin Account Settings State
+  // Account Settings State (Admin & Employee)
   const [accountProfile, setAccountProfile] = useState({
     full_name: user?.full_name || '',
     username: user?.username || '',
@@ -1812,42 +2162,41 @@ export function SettingsScreen({
   const [revokingSessions, setRevokingSessions] = useState(false);
 
   useEffect(() => {
-    if (initialTab) {
-      setTab(initialTab);
-    }
-  }, [initialTab]);
+    setTab(normalizeTab(initialTab));
+  }, [initialTab, canManageShopSettings]);
 
   const loadSettingsAndQueue = async () => {
-    try {
-      const res = await apiRequest('/settings');
-      if (res.settings) setForm(res.settings);
-    } catch {
-      // offline fallback
-    }
-    if (isAdmin) {
+    if (canManageShopSettings) {
       try {
-        const accRes = await apiRequest('/auth/account');
-        if (accRes.user) {
-          setAccountMeta(accRes.user);
-          setAccountProfile({
-            full_name: accRes.user.full_name || '',
-            username: accRes.user.username || '',
-            email: accRes.user.email || '',
-            phone: accRes.user.phone || '',
-          });
-        }
-        setSessions(accRes.sessions || []);
+        const res = await apiRequest('/settings');
+        if (res.settings) setForm(res.settings);
       } catch {
         // offline fallback
       }
+      const q = await getOfflineQueue();
+      setQueue(q);
     }
-    const q = await getOfflineQueue();
-    setQueue(q);
+
+    try {
+      const accRes = await apiRequest('/auth/account');
+      if (accRes.user) {
+        setAccountMeta(accRes.user);
+        setAccountProfile({
+          full_name: accRes.user.full_name || '',
+          username: accRes.user.username || '',
+          email: accRes.user.email || '',
+          phone: accRes.user.phone || '',
+        });
+      }
+      setSessions(accRes.sessions || []);
+    } catch {
+      // offline fallback
+    }
   };
 
   useEffect(() => {
     loadSettingsAndQueue();
-  }, [isAdmin]);
+  }, [user?.id, canManageShopSettings]);
 
   const queuePg = usePagination(queue, 5);
   const sessionsPg = usePagination(sessions, 5);
@@ -1981,9 +2330,17 @@ export function SettingsScreen({
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-extrabold text-slate-900">{t('System Settings & Backup')}</h1>
+        <h1 className="text-xl font-extrabold text-slate-900">
+          {canManageShopSettings && tab !== 'account'
+            ? t('System Settings & Backup')
+            : isAdmin
+              ? t('Admin Account Settings')
+              : t('My Account Settings')}
+        </h1>
         <p className="text-xs text-slate-500">
-          {t('Shop profile, TZS currency, credit/discount policies, offline synchronization, and database backup')}
+          {canManageShopSettings && tab !== 'account'
+            ? t('Shop profile, TZS currency, credit/discount policies, offline synchronization, and database backup')
+            : t('Manage your login username, profile details, password, and active login sessions')}
         </p>
       </div>
 
@@ -1999,42 +2356,44 @@ export function SettingsScreen({
         </div>
       )}
 
-      {/* Vertical Tab Layout (Matches Screen 24 Mockup) */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-        <div className="md:col-span-3 bg-white rounded-2xl border border-slate-200 p-2 space-y-1">
-          {[
-            ...(isAdmin ? [{ id: 'admin_account', label: t('Admin Account Settings') }] : []),
-            { id: 'general', label: t('General & Shop Info') },
-            { id: 'policies', label: t('Credit & Discount Rules') },
-            { id: 'sync', label: t('Offline Sync Queue ({count})', { count: queue.length }) },
-            { id: 'backup', label: t('Backup & Recovery') },
-          ].map((tabItem) => (
-            <button
-              key={tabItem.id}
-              type="button"
-              onClick={() => {
-                setTab(tabItem.id);
-                setMessage(null);
-              }}
-              className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
-                tab === tabItem.id
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              {tabItem.label}
-            </button>
-          ))}
-        </div>
+      {/* Vertical Tab Layout for Admin / Focused Account Card for Employee */}
+      <div className={canManageShopSettings ? 'grid grid-cols-1 md:grid-cols-12 gap-6 items-start' : 'max-w-4xl'}>
+        {canManageShopSettings && (
+          <div className="md:col-span-3 bg-white rounded-2xl border border-slate-200 p-2 space-y-1">
+            {[
+              { id: 'account', label: isAdmin ? t('Admin Account Settings') : t('My Account Settings') },
+              { id: 'general', label: t('General & Shop Info') },
+              { id: 'policies', label: t('Credit & Discount Rules') },
+              { id: 'sync', label: t('Offline Sync Queue ({count})', { count: queue.length }) },
+              { id: 'backup', label: t('Backup & Recovery') },
+            ].map((tabItem) => (
+              <button
+                key={tabItem.id}
+                type="button"
+                onClick={() => {
+                  setTab(tabItem.id);
+                  setMessage(null);
+                }}
+                className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+                  tab === tabItem.id
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {tabItem.label}
+              </button>
+            ))}
+          </div>
+        )}
 
-        <div className="md:col-span-9 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-          {tab === 'admin_account' && isAdmin && (
+        <div className={`${canManageShopSettings ? 'md:col-span-9' : ''} bg-white rounded-2xl border border-slate-200 p-6 shadow-sm`}>
+          {tab === 'account' && (
             <div className="space-y-6">
-              {/* Admin Profile Summary Banner */}
+              {/* Profile Summary Banner */}
               <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200">
                 <div className="flex items-center gap-3.5">
                   <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-extrabold text-base shadow-sm shrink-0">
-                    {(accountProfile.full_name || 'AD').slice(0, 2).toUpperCase()}
+                    {(accountProfile.full_name || 'US').slice(0, 2).toUpperCase()}
                   </div>
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2042,11 +2401,11 @@ export function SettingsScreen({
                         {accountMeta?.full_name || accountProfile.full_name}
                       </h2>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-700">
-                        {t('Admin')}
+                        {t(accountMeta?.primary_role || user?.primary_role || (isAdmin ? 'Admin' : 'Employee'))}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      @{accountMeta?.username || accountProfile.username} · {accountMeta?.employee_code || 'EMP-001'}
+                      @{accountMeta?.username || accountProfile.username} · {accountMeta?.employee_code || user?.employee_code || 'EMP'}
                       {accountMeta?.last_login_at
                         ? ` · ${t('Last login:')} ${formatDate(accountMeta.last_login_at, true)}`
                         : ''}
@@ -2061,21 +2420,21 @@ export function SettingsScreen({
                 </div>
               </div>
 
-              {/* Section 1: Admin Profile & Login Identity */}
+              {/* Section 1: Profile & Login Username */}
               <form onSubmit={handleSaveAdminProfile} className="space-y-4">
                 <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
                   <UserCog className="w-4 h-4 text-blue-600" />
                   <h3 className="text-sm font-extrabold text-slate-900">
-                    {t('Admin Profile & Login Identity')}
+                    {isAdmin ? t('Admin Profile & Login Identity') : t('My Profile & Login Username')}
                   </h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="admin-full-name" className="block text-xs font-bold text-slate-700 mb-1">
+                    <label htmlFor="account-full-name" className="block text-xs font-bold text-slate-700 mb-1">
                       {t('Full Name')} <span className="text-red-500">*</span>
                     </label>
                     <input
-                      id="admin-full-name"
+                      id="account-full-name"
                       type="text"
                       required
                       value={accountProfile.full_name}
@@ -2084,11 +2443,11 @@ export function SettingsScreen({
                     />
                   </div>
                   <div>
-                    <label htmlFor="admin-username" className="block text-xs font-bold text-slate-700 mb-1">
+                    <label htmlFor="account-username" className="block text-xs font-bold text-slate-700 mb-1">
                       {t('Login Username')} <span className="text-red-500">*</span>
                     </label>
                     <input
-                      id="admin-username"
+                      id="account-username"
                       type="text"
                       required
                       minLength={3}
@@ -2098,11 +2457,11 @@ export function SettingsScreen({
                     />
                   </div>
                   <div>
-                    <label htmlFor="admin-email" className="block text-xs font-bold text-slate-700 mb-1">
+                    <label htmlFor="account-email" className="block text-xs font-bold text-slate-700 mb-1">
                       {t('Email')}
                     </label>
                     <input
-                      id="admin-email"
+                      id="account-email"
                       type="email"
                       value={accountProfile.email}
                       onChange={(e) => setAccountProfile({ ...accountProfile, email: e.target.value })}
@@ -2111,11 +2470,11 @@ export function SettingsScreen({
                     />
                   </div>
                   <div>
-                    <label htmlFor="admin-phone" className="block text-xs font-bold text-slate-700 mb-1">
+                    <label htmlFor="account-phone" className="block text-xs font-bold text-slate-700 mb-1">
                       {t('Phone')}
                     </label>
                     <input
-                      id="admin-phone"
+                      id="account-phone"
                       type="tel"
                       value={accountProfile.phone}
                       onChange={(e) => setAccountProfile({ ...accountProfile, phone: e.target.value })}
@@ -2133,22 +2492,22 @@ export function SettingsScreen({
                 </button>
               </form>
 
-              {/* Section 2: Change Admin Password */}
+              {/* Section 2: Change Password */}
               <form onSubmit={handleChangeAdminPassword} className="space-y-4 pt-5 border-t border-slate-200">
                 <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
                   <Lock className="w-4 h-4 text-amber-600" />
                   <h3 className="text-sm font-extrabold text-slate-900">
-                    {t('Change Admin Password')}
+                    {isAdmin ? t('Change Admin Password') : t('Change My Password')}
                   </h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
-                    <label htmlFor="admin-cur-pw" className="block text-xs font-bold text-slate-700 mb-1">
+                    <label htmlFor="account-cur-pw" className="block text-xs font-bold text-slate-700 mb-1">
                       {t('Current Password')} <span className="text-red-500">*</span>
                     </label>
                     <div className="relative">
                       <input
-                        id="admin-cur-pw"
+                        id="account-cur-pw"
                         type={showCurrentPw ? 'text' : 'password'}
                         required
                         autoComplete="current-password"
@@ -2168,12 +2527,12 @@ export function SettingsScreen({
                     </div>
                   </div>
                   <div>
-                    <label htmlFor="admin-new-pw" className="block text-xs font-bold text-slate-700 mb-1">
+                    <label htmlFor="account-new-pw" className="block text-xs font-bold text-slate-700 mb-1">
                       {t('New Password')} <span className="text-red-500">*</span>
                     </label>
                     <div className="relative">
                       <input
-                        id="admin-new-pw"
+                        id="account-new-pw"
                         type={showNewPw ? 'text' : 'password'}
                         required
                         minLength={6}
@@ -2194,12 +2553,12 @@ export function SettingsScreen({
                     </div>
                   </div>
                   <div>
-                    <label htmlFor="admin-confirm-pw" className="block text-xs font-bold text-slate-700 mb-1">
+                    <label htmlFor="account-confirm-pw" className="block text-xs font-bold text-slate-700 mb-1">
                       {t('Confirm New Password')} <span className="text-red-500">*</span>
                     </label>
                     <div className="relative">
                       <input
-                        id="admin-confirm-pw"
+                        id="account-confirm-pw"
                         type={showConfirmPw ? 'text' : 'password'}
                         required
                         minLength={6}
@@ -2235,7 +2594,11 @@ export function SettingsScreen({
                     disabled={savingPassword}
                     className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-xs font-extrabold shadow-sm"
                   >
-                    {savingPassword ? t('Updating...') : t('Update Admin Password')}
+                    {savingPassword
+                      ? t('Updating...')
+                      : isAdmin
+                        ? t('Update Admin Password')
+                        : t('Update Password')}
                   </button>
                 </div>
               </form>
@@ -2246,7 +2609,9 @@ export function SettingsScreen({
                   <div className="flex items-center gap-2">
                     <Monitor className="w-4 h-4 text-slate-600" />
                     <h3 className="text-sm font-extrabold text-slate-900">
-                      {t('Active Admin Login Sessions ({count})', { count: sessions.length })}
+                      {isAdmin
+                        ? t('Active Admin Login Sessions ({count})', { count: sessions.length })
+                        : t('Active Login Sessions ({count})', { count: sessions.length })}
                     </h3>
                   </div>
                   {sessions.length > 1 && (
@@ -2292,7 +2657,7 @@ export function SettingsScreen({
             </div>
           )}
 
-          {(tab === 'general' || tab === 'policies') && (
+          {canManageShopSettings && (tab === 'general' || tab === 'policies') && (
             <form onSubmit={handleSave} className="space-y-4">
               {tab === 'general' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2434,7 +2799,7 @@ export function SettingsScreen({
             </form>
           )}
 
-          {tab === 'sync' && (
+          {canManageShopSettings && tab === 'sync' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -2503,7 +2868,7 @@ export function SettingsScreen({
             </div>
           )}
 
-          {tab === 'backup' && (
+          {canManageShopSettings && tab === 'backup' && (
             <div className="space-y-4">
               <h2 className="text-sm font-extrabold text-slate-900">
                 {t('Database Backup & Recovery (SRS Section 10)')}

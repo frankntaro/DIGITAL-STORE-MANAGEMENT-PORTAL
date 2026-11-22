@@ -134,31 +134,65 @@ class EmployeeSettingsController extends BaseApiController
             self::error('Employee not found.', 404);
         }
 
+        $fullName = trim((string) ($data['full_name'] ?? $before['full_name']));
+        $username = array_key_exists('username', $data)
+            ? trim((string) $data['username'])
+            : (string) $before['username'];
+        $email = isset($data['email']) ? (trim((string) $data['email']) ?: null) : $before['email'];
+        $phone = isset($data['phone']) ? (trim((string) $data['phone']) ?: null) : $before['phone'];
+        $status = (isset($data['status']) && in_array($data['status'], ['active', 'inactive'], true))
+            ? $data['status']
+            : (in_array($before['status'], ['active', 'inactive'], true) ? $before['status'] : 'active');
+        $maxDiscount = isset($data['max_discount_percent'])
+            ? (float) $data['max_discount_percent']
+            : (float) $before['max_discount_percent'];
+        $canApproveCredit = isset($data['can_approve_credit'])
+            ? (!empty($data['can_approve_credit']) ? 1 : 0)
+            : ($before['can_approve_credit'] ? 1 : 0);
+        $newPassword = isset($data['password']) ? trim((string) $data['password']) : '';
+
+        if ($fullName === '' || $username === '') {
+            self::error('Employee full name and username are required.', 422);
+        }
+        if (strlen($username) < 3 || preg_match('/\s/', $username)) {
+            self::error('Username must be at least 3 characters with no spaces.', 422);
+        }
+        if ($email !== null && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            self::error('Please enter a valid email address.', 422);
+        }
+        if ($newPassword !== '' && strlen($newPassword) < 6) {
+            self::error('New password must be at least 6 characters long.', 422);
+        }
+
+        $chkUser = $pdo->prepare("SELECT COUNT(*) FROM `users` WHERE `username` = ? AND `id` != ?");
+        $chkUser->execute([$username, $employeeId]);
+        if ((int) $chkUser->fetchColumn() > 0) {
+            self::error('This username is already used by another account.', 422);
+        }
+
+        if ($email !== null) {
+            $chkEmail = $pdo->prepare("SELECT COUNT(*) FROM `users` WHERE `email` = ? AND `id` != ?");
+            $chkEmail->execute([$email, $employeeId]);
+            if ((int) $chkEmail->fetchColumn() > 0) {
+                self::error('This email address is already used by another account.', 422);
+            }
+        }
+
         $pdo->beginTransaction();
         try {
-            $fullName = trim((string) ($data['full_name'] ?? $before['full_name']));
-            $email = isset($data['email']) ? (trim((string) $data['email']) ?: null) : $before['email'];
-            $phone = isset($data['phone']) ? (trim((string) $data['phone']) ?: null) : $before['phone'];
-            $status = (isset($data['status']) && in_array($data['status'], ['active', 'inactive'], true))
-                ? $data['status']
-                : (in_array($before['status'], ['active', 'inactive'], true) ? $before['status'] : 'active');
-            $maxDiscount = isset($data['max_discount_percent'])
-                ? (float) $data['max_discount_percent']
-                : (float) $before['max_discount_percent'];
-            $canApproveCredit = isset($data['can_approve_credit'])
-                ? (!empty($data['can_approve_credit']) ? 1 : 0)
-                : ($before['can_approve_credit'] ? 1 : 0);
-
             $pdo->prepare("
                 UPDATE `users`
-                SET `full_name` = ?, `email` = ?, `phone` = ?, `status` = ?,
+                SET `full_name` = ?, `username` = ?, `email` = ?, `phone` = ?, `status` = ?,
                     `max_discount_percent` = ?, `can_approve_credit` = ?
                 WHERE `id` = ?
-            ")->execute([$fullName, $email, $phone, $status, $maxDiscount, $canApproveCredit, $employeeId]);
+            ")->execute([$fullName, $username, $email, $phone, $status, $maxDiscount, $canApproveCredit, $employeeId]);
 
-            if (!empty($data['password'])) {
+            if ($newPassword !== '') {
                 $pdo->prepare("UPDATE `users` SET `password_hash` = ? WHERE `id` = ?")
-                    ->execute([password_hash((string) $data['password'], PASSWORD_BCRYPT), $employeeId]);
+                    ->execute([password_hash($newPassword, PASSWORD_BCRYPT), $employeeId]);
+                if ((int) $user['id'] !== $employeeId) {
+                    $pdo->prepare("DELETE FROM `personal_access_tokens` WHERE `user_id` = ?")->execute([$employeeId]);
+                }
             }
 
             if (isset($data['role_ids']) && is_array($data['role_ids']) && count($data['role_ids']) > 0) {
@@ -192,9 +226,9 @@ class EmployeeSettingsController extends BaseApiController
                 'employee.updated_permissions',
                 'User',
                 $employeeId,
-                ['roles' => $before['role_slugs'], 'permissions' => $before['permissions'], 'status' => $before['status']],
-                ['roles' => $after['role_slugs'], 'permissions' => $after['permissions'], 'status' => $after['status']],
-                $data['reason'] ?? 'Updated employee details, roles, or permissions'
+                ['username' => $before['username'], 'roles' => $before['role_slugs'], 'permissions' => $before['permissions'], 'status' => $before['status']],
+                ['username' => $after['username'], 'password_changed' => $newPassword !== '', 'roles' => $after['role_slugs'], 'permissions' => $after['permissions'], 'status' => $after['status']],
+                $data['reason'] ?? 'Updated employee details, credentials, roles, or permissions'
             );
 
             $pdo->commit();
@@ -263,6 +297,19 @@ class EmployeeSettingsController extends BaseApiController
         }
     }
 
+    private static function currentTokenHash(): ?string
+    {
+        $header = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+        if (empty($header) && function_exists('getallheaders')) {
+            $headers = getallheaders();
+            $header = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        }
+        if (preg_match('/Bearer\s+(.+)$/i', $header, $matches)) {
+            return hash('sha256', trim($matches[1]));
+        }
+        return null;
+    }
+
     public static function resetPassword(PDO $pdo, array $user, int $employeeId): never
     {
         self::requirePermission($user, 'employees.manage');
@@ -273,37 +320,93 @@ class EmployeeSettingsController extends BaseApiController
             self::error('Employee not found.', 404);
         }
 
+        $oldUsername = (string) $target['username'];
+        $hasUsernameInput = array_key_exists('username', $data);
+        $newUsername = $hasUsernameInput ? trim((string) $data['username']) : $oldUsername;
         $newPassword = trim((string) ($data['password'] ?? ''));
-        if (strlen($newPassword) < 6) {
+
+        $usernameChanged = $hasUsernameInput && $newUsername !== $oldUsername;
+        $passwordChanged = $newPassword !== '';
+
+        if (!$usernameChanged && !$passwordChanged) {
+            self::error('Please enter a new username or a new password (minimum 6 characters).', 422);
+        }
+
+        if ($hasUsernameInput) {
+            if ($newUsername === '' || strlen($newUsername) < 3 || preg_match('/\s/', $newUsername)) {
+                self::error('Username must be at least 3 characters with no spaces.', 422);
+            }
+            if ($usernameChanged) {
+                $chkUser = $pdo->prepare("SELECT COUNT(*) FROM `users` WHERE `username` = ? AND `id` != ?");
+                $chkUser->execute([$newUsername, $employeeId]);
+                if ((int) $chkUser->fetchColumn() > 0) {
+                    self::error('This username is already used by another account.', 422);
+                }
+            }
+        }
+
+        if ($passwordChanged && strlen($newPassword) < 6) {
             self::error('New password must be at least 6 characters long.', 422);
         }
 
         $pdo->beginTransaction();
         try {
-            $pdo->prepare("UPDATE `users` SET `password_hash` = ? WHERE `id` = ?")
-                ->execute([password_hash($newPassword, PASSWORD_BCRYPT), $employeeId]);
+            if ($usernameChanged) {
+                $pdo->prepare("UPDATE `users` SET `username` = ? WHERE `id` = ?")
+                    ->execute([$newUsername, $employeeId]);
+            }
 
-            $pdo->prepare("DELETE FROM `personal_access_tokens` WHERE `user_id` = ?")->execute([$employeeId]);
+            if ($passwordChanged) {
+                $pdo->prepare("UPDATE `users` SET `password_hash` = ? WHERE `id` = ?")
+                    ->execute([password_hash($newPassword, PASSWORD_BCRYPT), $employeeId]);
+
+                if ((int) $user['id'] === $employeeId) {
+                    $currentHash = self::currentTokenHash();
+                    if ($currentHash !== null) {
+                        $pdo->prepare("DELETE FROM `personal_access_tokens` WHERE `user_id` = ? AND `token_hash` != ?")
+                            ->execute([$employeeId, $currentHash]);
+                    }
+                } else {
+                    $pdo->prepare("DELETE FROM `personal_access_tokens` WHERE `user_id` = ?")->execute([$employeeId]);
+                }
+            }
+
+            $updated = AuthService::getUserWithRolesAndPermissions($pdo, $employeeId);
+
+            if ($usernameChanged && $passwordChanged) {
+                $action = 'employee.credentials_updated';
+                $reason = "Admin updated username (@{$oldUsername} -> @{$newUsername}) and reset password for {$target['full_name']}";
+                $message = "Username (@{$newUsername}) and password were updated successfully.";
+            } elseif ($usernameChanged) {
+                $action = 'employee.credentials_updated';
+                $reason = "Admin changed username from @{$oldUsername} to @{$newUsername} for {$target['full_name']}";
+                $message = "Username updated from @{$oldUsername} to @{$newUsername} successfully.";
+            } else {
+                $action = 'employee.password_reset';
+                $reason = "Admin reset password for employee @{$newUsername} ({$target['full_name']})";
+                $message = "Password for @{$newUsername} was reset successfully.";
+            }
 
             AuditService::log(
                 $pdo,
                 (int) $user['id'],
-                'employee.password_reset',
+                $action,
                 'User',
                 $employeeId,
-                null,
-                null,
-                "Admin reset password for employee @{$target['username']} ({$target['full_name']})"
+                ['username' => $oldUsername],
+                ['username' => $newUsername, 'password_reset' => $passwordChanged],
+                $reason
             );
 
             $pdo->commit();
             self::json([
-                'success' => true,
-                'message' => "Password for @{$target['username']} was reset successfully.",
+                'success'  => true,
+                'message'  => $message,
+                'employee' => $updated,
             ]);
         } catch (\Throwable $e) {
             $pdo->rollBack();
-            self::error('Failed to reset password: ' . $e->getMessage(), 500);
+            self::error('Failed to update credentials: ' . $e->getMessage(), 500);
         }
     }
 

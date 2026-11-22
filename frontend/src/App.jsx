@@ -133,7 +133,7 @@ const NAV_ITEMS = [
   { id: 'returns_warranty', screenNo: 21, label: 'Returns & Warranty', icon: RotateCcw, perm: ['returns.manage', 'warranties.manage'] },
   { id: 'reports', screenNo: 22, label: 'Reports & Analytics', icon: BarChart3, perm: ['reports.operational', 'reports.financial'] },
   { id: 'employees', screenNo: 23, label: 'Employees & RBAC', icon: ShieldCheck, perm: 'employees.manage' },
-  { id: 'admin_account', screenNo: 24, label: 'Admin Account', icon: UserCog, perm: 'settings.manage', ownerOnly: true },
+  { id: 'account_settings', screenNo: 24, label: 'My Account', icon: UserCog, perm: null },
   { id: 'settings', screenNo: 25, label: 'Settings', icon: Settings, perm: 'settings.manage' },
 ];
 
@@ -396,8 +396,16 @@ export default function App() {
 
   const isAdmin = (user?.role_slugs || []).includes('owner');
   const permittedNavItems = NAV_ITEMS.filter(
-    (item) => (!item.ownerOnly || isAdmin) && hasPermission(user, item.perm)
+    (item) => (!item.ownerOnly || isAdmin) && (!item.perm || hasPermission(user, item.perm))
   );
+
+  const handleUserUpdated = (nextUser) => {
+    if (!nextUser) return;
+    setUser(nextUser);
+    try {
+      localStorage.setItem('esms_cached_user', JSON.stringify(nextUser));
+    } catch {}
+  };
 
   const handleOrderFromSupplier = (product) => {
     if (!hasPermission(user, 'purchases.manage')) return;
@@ -632,17 +640,23 @@ export default function App() {
       case 'returns_warranty':
         return <ReturnsWarrantyScreen />;
       case 'reports':
-        return <ReportsScreen user={user} />;
+        return <ReportsScreen user={user} settings={settings} />;
       case 'employees':
-        return <EmployeesPermissionsScreen />;
+        return (
+          <EmployeesPermissionsScreen
+            currentUser={user}
+            onUserUpdated={handleUserUpdated}
+          />
+        );
+      case 'account_settings':
       case 'admin_account':
         return (
           <SettingsScreen
             user={user}
             settings={settings}
-            initialTab="admin_account"
+            initialTab="account"
             onSettingsUpdated={setSettings}
-            onUserUpdated={setUser}
+            onUserUpdated={handleUserUpdated}
             onQueueUpdated={refreshQueueCount}
           />
         );
@@ -653,7 +667,7 @@ export default function App() {
             settings={settings}
             initialTab="general"
             onSettingsUpdated={setSettings}
-            onUserUpdated={setUser}
+            onUserUpdated={handleUserUpdated}
             onQueueUpdated={refreshQueueCount}
           />
         );
@@ -719,8 +733,15 @@ export default function App() {
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">
           {permittedNavItems.map((item) => {
             const Icon = item.icon;
-            const active = activeScreen === item.id;
-            const label = t(item.label);
+            const active =
+              activeScreen === item.id ||
+              (item.id === 'account_settings' && activeScreen === 'admin_account');
+            const label =
+              item.id === 'account_settings'
+                ? isAdmin
+                  ? t('Admin Account')
+                  : t('My Account')
+                : t(item.label);
             return (
               <button
                 key={item.id}
@@ -760,22 +781,21 @@ export default function App() {
             <p className="font-bold text-white truncate">{user.full_name}</p>
             <p className="text-[11px] text-blue-400 font-medium">{t(user.primary_role)}</p>
           </div>
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => {
-                setActiveScreen('admin_account');
-                setMobileMenuOpen(false);
-              }}
-              className={`w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition ${
-                activeScreen === 'admin_account'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800/80 hover:bg-blue-600 text-slate-200 hover:text-white'
-              }`}
-            >
-              <UserCog className="w-3.5 h-3.5" /> {t('Admin Account Settings')}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveScreen('account_settings');
+              setMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition ${
+              activeScreen === 'account_settings' || activeScreen === 'admin_account'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-800/80 hover:bg-blue-600 text-slate-200 hover:text-white'
+            }`}
+          >
+            <UserCog className="w-3.5 h-3.5" />{' '}
+            {isAdmin ? t('Admin Account Settings') : t('My Account Settings')}
+          </button>
           <button
             type="button"
             onClick={handleLogout}
@@ -850,9 +870,9 @@ export default function App() {
                 {hasPermission(user, 'employees.manage') && (
                   <option value="employees">23. {t('Employees & RBAC')}</option>
                 )}
-                {isAdmin && (
-                  <option value="admin_account">24. {t('Admin Account Settings')}</option>
-                )}
+                <option value="account_settings">
+                  24. {isAdmin ? t('Admin Account Settings') : t('My Account Settings')}
+                </option>
                 {hasPermission(user, 'settings.manage') && (
                   <option value="settings">25. {t('Settings')}</option>
                 )}

@@ -86,16 +86,13 @@ class AuthController extends BaseApiController
         return null;
     }
 
-    private static function requireAdminOwner(array $user): void
+    private static function isAdminOwner(array $user): bool
     {
-        if (!in_array('owner', $user['role_slugs'] ?? [], true)) {
-            self::error('Access denied: Admin account settings are reserved for the Shop Admin.', 403);
-        }
+        return in_array('owner', $user['role_slugs'] ?? [], true);
     }
 
     public static function getAccount(PDO $pdo, array $user): never
     {
-        self::requireAdminOwner($user);
         $userId = (int) $user['id'];
         $currentHash = self::currentTokenHash();
 
@@ -132,17 +129,17 @@ class AuthController extends BaseApiController
 
     public static function updateAccountProfile(PDO $pdo, array $user): never
     {
-        self::requireAdminOwner($user);
         $userId = (int) $user['id'];
+        $isAdmin = self::isAdminOwner($user);
         $data = self::input();
 
-        $fullName = trim((string) ($data['full_name'] ?? ''));
+        $fullName = trim((string) ($data['full_name'] ?? $user['full_name'] ?? ''));
         $username = trim((string) ($data['username'] ?? ''));
-        $email = trim((string) ($data['email'] ?? '')) ?: null;
-        $phone = trim((string) ($data['phone'] ?? '')) ?: null;
+        $email = array_key_exists('email', $data) ? (trim((string) $data['email']) ?: null) : ($user['email'] ?? null);
+        $phone = array_key_exists('phone', $data) ? (trim((string) $data['phone']) ?: null) : ($user['phone'] ?? null);
 
         if ($fullName === '' || $username === '') {
-            self::error('Admin full name and username are required.', 422);
+            self::error('Full name and username are required.', 422);
         }
         if (strlen($username) < 3 || preg_match('/\s/', $username)) {
             self::error('Username must be at least 3 characters with no spaces.', 422);
@@ -183,7 +180,7 @@ class AuthController extends BaseApiController
         AuditService::log(
             $pdo,
             $userId,
-            'admin.account_updated',
+            $isAdmin ? 'admin.account_updated' : 'user.account_updated',
             'User',
             $userId,
             $before,
@@ -193,20 +190,20 @@ class AuthController extends BaseApiController
                 'email'     => $email,
                 'phone'     => $phone,
             ],
-            'Admin updated own account profile settings'
+            $isAdmin ? 'Admin updated own account profile settings' : 'Employee updated own account profile settings'
         );
 
         self::json([
             'success' => true,
-            'message' => 'Admin account profile updated successfully.',
+            'message' => $isAdmin ? 'Admin account profile updated successfully.' : 'Account profile updated successfully.',
             'user'    => $updated,
         ]);
     }
 
     public static function changeAccountPassword(PDO $pdo, array $user): never
     {
-        self::requireAdminOwner($user);
         $userId = (int) $user['id'];
+        $isAdmin = self::isAdminOwner($user);
         $data = self::input();
 
         $currentPassword = (string) ($data['current_password'] ?? '');
@@ -249,18 +246,18 @@ class AuthController extends BaseApiController
             AuditService::log(
                 $pdo,
                 $userId,
-                'admin.password_changed',
+                $isAdmin ? 'admin.password_changed' : 'user.password_changed',
                 'User',
                 $userId,
                 null,
                 ['revoked_other_sessions' => $revoked],
-                'Admin changed own account password'
+                $isAdmin ? 'Admin changed own account password' : 'Employee changed own account password'
             );
 
             $pdo->commit();
             self::json([
                 'success'          => true,
-                'message'          => 'Admin password updated successfully.',
+                'message'          => $isAdmin ? 'Admin password updated successfully.' : 'Password updated successfully.',
                 'revoked_sessions' => $revoked,
             ]);
         } catch (\Throwable $e) {
@@ -271,8 +268,8 @@ class AuthController extends BaseApiController
 
     public static function revokeOtherSessions(PDO $pdo, array $user): never
     {
-        self::requireAdminOwner($user);
         $userId = (int) $user['id'];
+        $isAdmin = self::isAdminOwner($user);
         $currentHash = self::currentTokenHash();
 
         $revoked = 0;
@@ -285,12 +282,12 @@ class AuthController extends BaseApiController
         AuditService::log(
             $pdo,
             $userId,
-            'admin.sessions_revoked',
+            $isAdmin ? 'admin.sessions_revoked' : 'user.sessions_revoked',
             'User',
             $userId,
             null,
             ['revoked_sessions' => $revoked],
-            'Admin signed out all other active devices'
+            $isAdmin ? 'Admin signed out all other active devices' : 'Employee signed out all other active devices'
         );
 
         self::json([

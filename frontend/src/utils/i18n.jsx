@@ -1409,6 +1409,48 @@ export const SW_DICTIONARY = {
   'Security audit logs': 'Kumbukumbu za ukaguzi wa usalama',
   'Offline mode detected automatically — transactions will sync once connection returns': 'Hali ya nje ya mtandao imegunduliwa kiotomatiki — miamala itasawazishwa mtandao ukirejea',
   'Connected to server — online status detected automatically': 'Imeunganishwa na seva — hali ya mtandaoni imegunduliwa kiotomatiki',
+
+  // Employee Account Settings, Admin Username/Password Reset & Report Sharing
+  'My Account': 'Akaunti Yangu',
+  'My Account Settings': 'Mipangilio ya Akaunti Yangu',
+  'Manage your login username, profile details, password, and active login sessions': 'Dhibiti jina lako la mtumiaji, taarifa za wasifu, nenosiri, na vifaa vilivyoingia',
+  'My Profile & Login Username': 'Wasifu Wangu na Jina la Mtumiaji',
+  'Change My Password': 'Badilisha Nenosiri Langu',
+  'Update Password': 'Sasisha Nenosiri',
+  'Active Login Sessions ({count})': 'Vipindi vya Kuingia ({count})',
+  'Full name and username are required.': 'Jina kamili na jina la mtumiaji vinahitajika.',
+  'Account profile updated successfully.': 'Wasifu wa akaunti umesasishwa kikamilifu.',
+  'Password updated successfully.': 'Nenosiri limesasishwa kikamilifu.',
+  'admin.account_updated': 'Wasifu wa Msimamizi Umesasishwa',
+  'admin.password_changed': 'Nenosiri la Msimamizi Limebadilishwa',
+  'admin.sessions_revoked': 'Vifaa Vingine vya Msimamizi Vimeondolewa',
+  'user.account_updated': 'Wasifu wa Mfanyakazi Umesasishwa',
+  'user.password_changed': 'Nenosiri la Mfanyakazi Limebadilishwa',
+  'user.sessions_revoked': 'Vifaa Vingine vya Mfanyakazi Vimeondolewa',
+  'employee.credentials_updated': 'Taarifa za Kuingia za Mfanyakazi Zimesasishwa',
+  'Register new staff, edit usernames & reset passwords, delete accounts, and configure employee permissions': 'Sajili wafanyakazi wapya, hariri majina ya watumiaji na weka upya manenosiri, futa akaunti, na sanidi ruhusa',
+  'Edit Username & Reset Password': 'Hariri Jina la Mtumiaji na Weka Upya Nenosiri',
+  'Enter login username': 'Weka jina la mtumiaji',
+  'New Password (Optional — minimum 6 characters)': 'Nenosiri Jipya (Hiari — angalau herufi 6)',
+  'Leave blank to keep current password': 'Acha wazi ili kubaki na nenosiri la sasa',
+  'Update username only, reset password only, or save both at once. Resetting the password signs out the account on other devices.': 'Sasisha jina la mtumiaji pekee, weka upya nenosiri pekee, au hifadhi vyote kwa pamoja. Kuweka upya nenosiri huondoa akaunti kwenye vifaa vingine.',
+  'Save Credentials': 'Hifadhi Taarifa za Kuingia',
+  'Credentials': 'Akaunti',
+  'Please enter a new username or a new password (minimum 6 characters).': 'Tafadhali weka jina jipya la mtumiaji au nenosiri jipya (angalau herufi 6).',
+  'Sales, Inventory, Customer, Supplier, and P&L statements with PDF, Excel & instant sharing': 'Taarifa za Mauzo, Hisa, Wateja, Wasambazaji na Faida & Hasara zenye PDF, Excel na kushiriki papo hapo',
+  'Share Report': 'Shiriki Ripoti',
+  'Report Summary Preview': 'Hakiki ya Muhtasari wa Ripoti',
+  'Financial P&L Summary': 'Muhtasari wa Faida na Hasara (P&L)',
+  'Top Products Sold': 'Bidhaa Zilizoongoza Kwa Mauzo',
+  'Sales by Category': 'Mauzo kwa Kundi',
+  '...and {count} more item(s)': '...na bidhaa nyingine {count}',
+  'Generated on': 'Imetolewa tarehe',
+  'Share': 'Shiriki',
+  'Copy': 'Nakili',
+  'Copied!': 'Imenakiliwa!',
+  'Report summary copied to clipboard!': 'Muhtasari wa ripoti umenakiliwa!',
+  'Could not copy report automatically. Please select and copy the text below.': 'Imeshindikana kunakili kiotomatiki. Tafadhali chagua na unakili maandishi hapa chini.',
+  'Report shared successfully!': 'Ripoti imeshirikiwa kikamilifu!',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY
@@ -1465,6 +1507,12 @@ function translateDynamicSw(text) {
   }
   if ((m = text.match(/^Password for\s+(@\S+)\s+was reset successfully\.?$/i))) {
     return `Nenosiri la ${m[1]} limewekwa upya kikamilifu.`;
+  }
+  if ((m = text.match(/^Username\s+\((@\S+)\)\s+and password were updated successfully\.?$/i))) {
+    return `Jina la mtumiaji (${m[1]}) na nenosiri vimesasishwa kikamilifu.`;
+  }
+  if ((m = text.match(/^Username updated from\s+(@\S+)\s+to\s+(@\S+)\s+successfully\.?$/i))) {
+    return `Jina la mtumiaji limebadilishwa kutoka ${m[1]} kwenda ${m[2]} kikamilifu.`;
   }
   if ((m = text.match(/^Cash session\s+(.+?)\s+opened with TZS\s+(.+?)\.?$/i))) {
     return `Zamu ya fedha ${m[1]} imefunguliwa kwa kianzio cha TZS ${m[2]}.`;
