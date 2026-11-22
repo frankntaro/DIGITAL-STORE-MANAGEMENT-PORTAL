@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 // CORS Headers for React Frontend (Vite dev server, PWA & single-origin production)
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+header('Access-Control-Allow-Methods: GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Device-Id');
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
@@ -61,7 +61,9 @@ $serveStaticFile = static function (string $filePath, string $cacheControl): nev
     }
 
     header('Content-Length: ' . (string) $size);
-    readfile($filePath);
+    if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'HEAD') {
+        readfile($filePath);
+    }
     exit;
 };
 
@@ -82,29 +84,33 @@ if (str_starts_with($requestPath, '/uploads/')) {
 }
 
 // 2. Dynamic SEO robots.txt & sitemap.xml (auto-adapts to Render, Koyeb, Railway, or custom .co.tz domain)
-if ($requestMethod === 'GET' && $requestPath === '/robots.txt') {
+if (($requestMethod === 'GET' || $requestMethod === 'HEAD') && $requestPath === '/robots.txt') {
     header('Content-Type: text/plain; charset=utf-8');
     header('Cache-Control: public, max-age=3600');
-    echo "User-agent: *\n";
-    echo "Allow: /\n";
-    echo "Disallow: /api/\n\n";
-    echo "Sitemap: {$siteOrigin}/sitemap.xml\n";
+    if ($requestMethod !== 'HEAD') {
+        echo "User-agent: *\n";
+        echo "Allow: /\n";
+        echo "Disallow: /api/\n\n";
+        echo "Sitemap: {$siteOrigin}/sitemap.xml\n";
+    }
     exit;
 }
 
-if ($requestMethod === 'GET' && $requestPath === '/sitemap.xml') {
+if (($requestMethod === 'GET' || $requestMethod === 'HEAD') && $requestPath === '/sitemap.xml') {
     header('Content-Type: application/xml; charset=utf-8');
     header('Cache-Control: public, max-age=3600');
-    $today = gmdate('Y-m-d');
-    echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-    echo "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n";
-    echo "  <url>\n";
-    echo "    <loc>{$siteOrigin}/</loc>\n";
-    echo "    <lastmod>{$today}</lastmod>\n";
-    echo "    <changefreq>daily</changefreq>\n";
-    echo "    <priority>1.0</priority>\n";
-    echo "  </url>\n";
-    echo "</urlset>\n";
+    if ($requestMethod !== 'HEAD') {
+        $today = gmdate('Y-m-d');
+        echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+        echo "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n";
+        echo "  <url>\n";
+        echo "    <loc>{$siteOrigin}/</loc>\n";
+        echo "    <lastmod>{$today}</lastmod>\n";
+        echo "    <changefreq>daily</changefreq>\n";
+        echo "    <priority>1.0</priority>\n";
+        echo "  </url>\n";
+        echo "</urlset>\n";
+    }
     exit;
 }
 
@@ -160,7 +166,9 @@ if ($distRoot && is_dir($distRoot) && ($requestMethod === 'GET' || $requestMetho
         header('Cache-Control: no-cache, max-age=0, must-revalidate');
         header('X-Content-Type-Options: nosniff');
         header('Referrer-Policy: strict-origin-when-cross-origin');
-        echo $html;
+        if ($requestMethod !== 'HEAD') {
+            echo $html;
+        }
         exit;
     }
 }

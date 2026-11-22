@@ -13,8 +13,8 @@ $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 $path = '/' . trim(preg_replace('#^/api#', '', $uri), '/');
 
-// Fast Public Health Endpoint (responds immediately for Render/Koyeb health probes & uptime monitors)
-if ($method === 'GET' && ($path === '/' || $path === '/health')) {
+// Fast Public Health Endpoint (supports GET and HEAD for Render/Koyeb probes & UptimeRobot monitors)
+if (($method === 'GET' || $method === 'HEAD') && ($path === '/' || $path === '/health')) {
     $cfg = DatabaseInstaller::getConnectionConfig();
     $payload = [
         'success'       => true,
@@ -24,13 +24,16 @@ if ($method === 'GET' && ($path === '/' || $path === '/health')) {
         'db_configured' => !empty($cfg['host']) && !empty($cfg['database']),
         'currency'      => 'TZS',
     ];
-    if (($_GET['db'] ?? '') === '1') {
+    if ($method === 'GET' && ($_GET['db'] ?? '') === '1') {
         $pdoCheck = DatabaseInstaller::connect();
         DatabaseInstaller::ensureInstalled($pdoCheck);
         $payload['database_ready'] = true;
     }
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($payload);
+    header('Cache-Control: no-store');
+    if ($method !== 'HEAD') {
+        echo json_encode($payload);
+    }
     exit;
 }
 
