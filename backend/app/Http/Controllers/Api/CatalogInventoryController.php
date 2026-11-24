@@ -1303,15 +1303,37 @@ class CatalogInventoryController extends BaseApiController
             LIMIT 100
         ");
 
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+        $inventoryRows = $productsStmt->fetchAll();
+        $movementRows = $movementsStmt->fetchAll();
+
+        if (!$isAdmin) {
+            foreach ($inventoryRows as &$row) {
+                unset(
+                    $row['purchase_price'],
+                    $row['weighted_avg_cost'],
+                    $row['unit_cost'],
+                    $row['stock_cost_valuation'],
+                    $row['stock_retail_valuation']
+                );
+            }
+            unset($row);
+            foreach ($movementRows as &$mRow) {
+                unset($mRow['unit_cost']);
+            }
+            unset($mRow);
+        }
+
         $pendingOrdersCount = AuthService::hasPermission($user, 'purchases.manage')
             ? (int) $pdo->query("SELECT COUNT(*) FROM `purchases` WHERE `status` = 'pending'")->fetchColumn()
             : 0;
 
         self::json([
             'success'              => true,
-            'inventory'            => $productsStmt->fetchAll(),
-            'movements'            => $movementsStmt->fetchAll(),
+            'inventory'            => $inventoryRows,
+            'movements'            => $movementRows,
             'pending_orders_count' => $pendingOrdersCount,
+            'valuation_permitted'  => $isAdmin,
         ]);
     }
 

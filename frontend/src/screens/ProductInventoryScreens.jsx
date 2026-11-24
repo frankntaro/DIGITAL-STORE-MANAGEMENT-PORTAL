@@ -2322,6 +2322,7 @@ export function ApproveOrdersScreen({
 // ============================================================================
 export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, onOpenApproveOrders }) {
   const { t } = useLanguage();
+  const isAdmin = (user?.role_slugs || []).includes('owner');
   const [inventory, setInventory] = useState([]);
   const [movements, setMovements] = useState([]);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
@@ -2340,76 +2341,86 @@ export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, o
     loadInventory();
   }, []);
 
-  const displayed = lowStockOnly
+  const displayed = isAdmin && lowStockOnly
     ? inventory.filter((i) => i.stock_status !== 'in_stock')
     : inventory;
 
-  const levelsPg = usePagination(displayed, 5, String(lowStockOnly));
+  const levelsPg = usePagination(displayed, 5, String(isAdmin && lowStockOnly));
   const movementsPg = usePagination(movements, 5);
 
-  const totalCostVal = inventory.reduce((s, i) => s + Number(i.stock_cost_valuation || 0), 0);
-  const totalRetailVal = inventory.reduce((s, i) => s + Number(i.stock_retail_valuation || 0), 0);
+  const totalCostVal = isAdmin
+    ? inventory.reduce((s, i) => s + Number(i.stock_cost_valuation || 0), 0)
+    : 0;
+  const totalRetailVal = isAdmin
+    ? inventory.reduce((s, i) => s + Number(i.stock_retail_valuation || 0), 0)
+    : 0;
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-extrabold text-slate-900">{t('Inventory & Stock Control')}</h1>
-          <p className="text-xs text-slate-500">
-            {t('Weighted-average cost valuation, low-stock monitoring, and complete stock movement history')}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => setLowStockOnly((v) => !v)}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition ${
-              lowStockOnly
-                ? 'bg-amber-600 text-white border-amber-600'
-                : 'bg-white text-slate-700 border-slate-300'
-            }`}
-          >
-            {t('Low Stock Only')}
-          </button>
-          {canOrder && pendingOrdersCount > 0 && onOpenApproveOrders && (
-            <button
-              type="button"
-              onClick={onOpenApproveOrders}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              {t('Approve Orders')} ({pendingOrdersCount})
-            </button>
-          )}
-          {hasPermission(user, 'inventory.adjust') && (
-            <button
-              type="button"
-              onClick={onOpenAdjustment}
-              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm"
-            >
-              {t('+ Record Stock Adjustment')}
-            </button>
+          {isAdmin && (
+            <p className="text-xs text-slate-500">
+              {t('Weighted-average cost valuation, low-stock monitoring, and complete stock movement history')}
+            </p>
           )}
         </div>
+        {isAdmin && (
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setLowStockOnly((v) => !v)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition ${
+                lowStockOnly
+                  ? 'bg-amber-600 text-white border-amber-600'
+                  : 'bg-white text-slate-700 border-slate-300'
+              }`}
+            >
+              {t('Low Stock Only')}
+            </button>
+            {canOrder && pendingOrdersCount > 0 && onOpenApproveOrders && (
+              <button
+                type="button"
+                onClick={onOpenApproveOrders}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {t('Approve Orders')} ({pendingOrdersCount})
+              </button>
+            )}
+            {hasPermission(user, 'inventory.adjust') && (
+              <button
+                type="button"
+                onClick={onOpenAdjustment}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm"
+              >
+                {t('+ Record Stock Adjustment')}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Valuation Summary Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <p className="text-xs text-slate-500">{t('Inventory Cost Value (Weighted Avg)')}</p>
-          <p className="text-xl font-extrabold text-slate-900 mt-1">{formatTZS(totalCostVal)}</p>
+      {/* Valuation Summary Strip (Admin Only) */}
+      {isAdmin && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <p className="text-xs text-slate-500">{t('Inventory Cost Value (Weighted Avg)')}</p>
+            <p className="text-xl font-extrabold text-slate-900 mt-1">{formatTZS(totalCostVal)}</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <p className="text-xs text-slate-500">{t('Estimated Retail Value')}</p>
+            <p className="text-xl font-extrabold text-blue-600 mt-1">{formatTZS(totalRetailVal)}</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <p className="text-xs text-slate-500">{t('Expected Margin on Stock')}</p>
+            <p className="text-xl font-extrabold text-emerald-600 mt-1">
+              {formatTZS(totalRetailVal - totalCostVal)}
+            </p>
+          </div>
         </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <p className="text-xs text-slate-500">{t('Estimated Retail Value')}</p>
-          <p className="text-xl font-extrabold text-blue-600 mt-1">{formatTZS(totalRetailVal)}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <p className="text-xs text-slate-500">{t('Expected Margin on Stock')}</p>
-          <p className="text-xl font-extrabold text-emerald-600 mt-1">
-            {formatTZS(totalRetailVal - totalCostVal)}
-          </p>
-        </div>
-      </div>
+      )}
 
       <div className="flex gap-2 border-b border-slate-200">
         <button
@@ -2441,8 +2452,12 @@ export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, o
                   <th className="py-3 px-4 text-left font-bold">{t('Product')}</th>
                   <th className="py-3 px-4 text-center font-bold">{t('Available Stock')}</th>
                   <th className="py-3 px-4 text-center font-bold">{t('Damaged')}</th>
-                  <th className="py-3 px-4 text-right font-bold">{t('Weighted Unit Cost')}</th>
-                  <th className="py-3 px-4 text-right font-bold">{t('Total Valuation')}</th>
+                  {isAdmin && (
+                    <>
+                      <th className="py-3 px-4 text-right font-bold">{t('Weighted Unit Cost')}</th>
+                      <th className="py-3 px-4 text-right font-bold">{t('Total Valuation')}</th>
+                    </>
+                  )}
                   <th className="py-3 px-4 text-center font-bold">{t('Status')}</th>
                   {canOrder && <th className="py-3 px-4 text-center font-bold">{t('Reorder')}</th>}
                 </tr>
@@ -2480,10 +2495,14 @@ export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, o
                     <td className="py-3 px-4 text-center text-red-600 font-semibold">
                       {formatQtyWithUnit(item.damaged_quantity, item.unit)}
                     </td>
-                    <td className="py-3 px-4 text-right">{formatUnitPrice(item.unit_cost, item.unit)}</td>
-                    <td className="py-3 px-4 text-right font-bold text-slate-900">
-                      {formatTZS(item.stock_cost_valuation)}
-                    </td>
+                    {isAdmin && (
+                      <>
+                        <td className="py-3 px-4 text-right">{formatUnitPrice(item.unit_cost, item.unit)}</td>
+                        <td className="py-3 px-4 text-right font-bold text-slate-900">
+                          {formatTZS(item.stock_cost_valuation)}
+                        </td>
+                      </>
+                    )}
                     <td className="py-3 px-4 text-center">
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
