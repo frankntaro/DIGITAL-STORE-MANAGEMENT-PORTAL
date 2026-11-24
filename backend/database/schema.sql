@@ -609,4 +609,10 @@ CREATE TABLE IF NOT EXISTS `stock_transfer_items` (
   CONSTRAINT `fk_sti_product` FOREIGN KEY (`product_id`) REFERENCES `products`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 32. ONE-TIME DATABASE MIGRATIONS TRACKER
+CREATE TABLE IF NOT EXISTS `system_migrations` (
+  `migration_key` VARCHAR(120) PRIMARY KEY,
+  `applied_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
