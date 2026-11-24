@@ -1,7 +1,9 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowRightLeft,
   BarChart3,
+  Bell,
   Boxes,
   Building2,
   CheckCircle2,
@@ -115,7 +117,7 @@ import {
   setAuthToken,
   synchronizeOfflineQueue,
 } from './services/api';
-import { hasPermission } from './utils/format';
+import { formatDate, formatTZS, hasPermission } from './utils/format';
 import { useLanguage } from './utils/i18n';
 
 const NAV_ITEMS = [
@@ -165,6 +167,12 @@ export default function App() {
   const [selectedSupplierId, setSelectedSupplierId] = useState(1);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Admin Real-Time Notifications State (Employee Sales, Sold-Out Products & Expenses)
+  const [adminNotifications, setAdminNotifications] = useState([]);
+  const [notifMenuOpen, setNotifMenuOpen] = useState(false);
+  const [openedNotification, setOpenedNotification] = useState(null);
+  const notifDropdownRef = useRef(null);
+
   // Apply dark mode theme class to <html>
   useEffect(() => {
     if (theme === 'dark') {
@@ -206,6 +214,53 @@ export default function App() {
     }
   };
 
+  const refreshAdminNotifications = async (activeUser = user) => {
+    if (!activeUser || !(activeUser.role_slugs || []).includes('owner')) {
+      setAdminNotifications([]);
+      return;
+    }
+    try {
+      const res = await apiRequest('/notifications', { fresh: true });
+      setAdminNotifications(res.notifications || []);
+    } catch {
+      // ignore offline error
+    }
+  };
+
+  const handleOpenNotification = (notif) => {
+    if (!notif) return;
+    setOpenedNotification(notif);
+    setNotifMenuOpen(false);
+    // Remove from unread list immediately & persist read state so it disappears after opening
+    setAdminNotifications((prev) => prev.filter((item) => item.id !== notif.id));
+    apiRequest(`/notifications/${notif.id}/read`, { method: 'POST' }).catch(() => {});
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    setAdminNotifications([]);
+    setNotifMenuOpen(false);
+    try {
+      await apiRequest('/notifications/read-all', { method: 'POST' });
+    } catch {
+      // ignore offline error
+    }
+  };
+
+  const handleNavigateFromNotification = (notif) => {
+    if (!notif) return;
+    setOpenedNotification(null);
+    if (notif.type === 'employee_sale' && notif.entity_id) {
+      setSelectedSaleId(Number(notif.entity_id));
+      setActiveScreen('sale_details');
+    } else if (notif.type === 'sold_out') {
+      setActiveScreen('inventory');
+    } else if (notif.type === 'employee_expense') {
+      setActiveScreen('expenses');
+    } else {
+      setActiveScreen('dashboard');
+    }
+  };
+
   useEffect(() => {
     const token = getAuthToken();
     if (!token) {
@@ -223,6 +278,7 @@ export default function App() {
         refreshOfflineBootstrap();
         refreshQueueCount();
         refreshPendingOrdersCount(res.user);
+        refreshAdminNotifications(res.user);
       })
       .catch((err) => {
         if (err?.status === 401 || err?.status === 403) {
@@ -327,6 +383,45 @@ export default function App() {
     };
   }, [user, isOffline]);
 
+  // Poll Admin notifications in real time (every 20s + on tab focus) when Admin is online
+  useEffect(() => {
+    if (!user || !(user.role_slugs || []).includes('owner') || isOffline) return undefined;
+    let active = true;
+    const poll = () => {
+      if (!active || (typeof document !== 'undefined' && document.hidden)) return;
+      refreshAdminNotifications(user);
+    };
+    poll();
+    const timer = setInterval(poll, 20000);
+    window.addEventListener('focus', poll);
+    document.addEventListener('visibilitychange', poll);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener('focus', poll);
+      document.removeEventListener('visibilitychange', poll);
+    };
+  }, [user, isOffline]);
+
+  // Close notification dropdown on outside click or Escape
+  useEffect(() => {
+    if (!notifMenuOpen) return undefined;
+    const onDocClick = (e) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setNotifMenuOpen(false);
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setNotifMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [notifMenuOpen]);
+
   // Preload high-frequency chunks (POS & Products) in idle time right after login for instant navigation
   useEffect(() => {
     if (!user) return;
@@ -376,6 +471,7 @@ export default function App() {
       await refreshOfflineBootstrap();
       await refreshQueueCount();
       await refreshPendingOrdersCount(res.user);
+      await refreshAdminNotifications(res.user);
     } catch (err) {
       setLoginError(err.message);
     } finally {
@@ -390,6 +486,9 @@ export default function App() {
       // ignore offline logout error
     }
     setAuthToken(null);
+    setAdminNotifications([]);
+    setNotifMenuOpen(false);
+    setOpenedNotification(null);
     try {
       localStorage.removeItem('esms_cached_user');
     } catch {}
@@ -911,6 +1010,114 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Admin Real-Time Notifications Bell (Employee Sales, Sold-Out & Expenses) */}
+            {isAdmin && (
+              <div className="relative" ref={notifDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotifMenuOpen((v) => !v);
+                    if (!notifMenuOpen) refreshAdminNotifications(user);
+                  }}
+                  aria-label={t('Admin Notifications')}
+                  title={t('Admin Notifications')}
+                  className={`relative inline-flex items-center justify-center p-2 rounded-xl border transition ${
+                    adminNotifications.length > 0
+                      ? 'border-red-300 bg-red-50 hover:bg-red-100 text-red-700'
+                      : 'border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  <Bell className={`w-4 h-4 ${adminNotifications.length > 0 ? 'animate-bounce' : ''}`} />
+                  {adminNotifications.length > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-extrabold flex items-center justify-center shadow-sm">
+                      {adminNotifications.length > 99 ? '99+' : adminNotifications.length}
+                    </span>
+                  )}
+                </button>
+
+                {notifMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-[90vw] max-w-sm bg-white rounded-2xl border border-slate-200 shadow-2xl z-50 overflow-hidden">
+                    <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-extrabold text-slate-900">
+                          {t('Admin Notifications ({count})', { count: adminNotifications.length })}
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          {t('Click a notification to view details and clear it')}
+                        </p>
+                      </div>
+                      {adminNotifications.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleMarkAllNotificationsRead}
+                          className="text-[11px] font-bold text-blue-600 hover:underline shrink-0"
+                        >
+                          {t('Clear All')}
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                      {adminNotifications.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-slate-400">
+                          {t('No new notifications — all caught up!')}
+                        </div>
+                      ) : (
+                        adminNotifications.map((notif) => {
+                          const badgeClass =
+                            notif.type === 'sold_out'
+                              ? 'bg-red-100 text-red-700'
+                              : notif.type === 'employee_expense'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-blue-100 text-blue-700';
+                          const typeLabel =
+                            notif.type === 'sold_out'
+                              ? t('Product Sold Out')
+                              : notif.type === 'employee_expense'
+                                ? t('Employee Expense')
+                                : t('Employee Sale');
+                          return (
+                            <button
+                              key={notif.id}
+                              type="button"
+                              onClick={() => handleOpenNotification(notif)}
+                              className="w-full text-left p-3.5 hover:bg-slate-50 transition space-y-1"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${badgeClass}`}>
+                                  {typeLabel}
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                  {formatDate(notif.created_at, true)}
+                                </span>
+                              </div>
+                              <p className="text-xs font-bold text-slate-900 line-clamp-1">
+                                {notif.type === 'sold_out'
+                                  ? t('Product Sold Out: {product}', { product: notif.meta?.product_name || notif.title })
+                                  : notif.type === 'employee_expense'
+                                    ? t('Expense {ref}: {title}', {
+                                        ref: notif.meta?.reference_number || '',
+                                        title: notif.meta?.expense_title || notif.title,
+                                      })
+                                    : t('Sale {ref}', { ref: notif.meta?.receipt_number || notif.title })}
+                              </p>
+                              <p className="text-[11px] text-slate-600 line-clamp-2">
+                                {notif.actor_name}
+                                {notif.amount !== null && notif.amount !== undefined
+                                  ? ` · ${formatTZS(notif.amount)}`
+                                  : ''}
+                                {notif.meta?.items_summary ? ` · ${notif.meta.items_summary}` : ''}
+                                {notif.meta?.category ? ` · ${t(notif.meta.category)}` : ''}
+                              </p>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Language Switcher Button (Swahili & English) */}
             <button
               type="button"
@@ -992,6 +1199,229 @@ export default function App() {
             <button type="button" onClick={() => setSyncBanner(null)} className="underline shrink-0">
               {t('Dismiss')}
             </button>
+          </div>
+        )}
+
+        {/* Top-of-App Live Admin Notification Bar (Disappears automatically once opened & viewed) */}
+        {isAdmin && adminNotifications.length > 0 && (() => {
+          const latest = adminNotifications[0];
+          const hasCritical = adminNotifications.some((n) => n.type === 'sold_out');
+          const hasExpense = adminNotifications.some((n) => n.type === 'employee_expense');
+          const barColors = hasCritical
+            ? 'bg-red-600 text-white'
+            : hasExpense
+              ? 'bg-amber-600 text-white'
+              : 'bg-blue-600 text-white';
+          const latestSummary =
+            latest.type === 'sold_out'
+              ? t('{actor} sold out {product} (0 remaining)', {
+                  actor: latest.actor_name || t('Employee'),
+                  product: latest.meta?.product_name || latest.title,
+                })
+              : latest.type === 'employee_expense'
+                ? t('{actor} recorded expense {title} ({amount})', {
+                    actor: latest.actor_name || t('Employee'),
+                    title: latest.meta?.expense_title || latest.title,
+                    amount: formatTZS(latest.amount),
+                  })
+                : t('{actor} completed sale {ref} ({amount})', {
+                    actor: latest.actor_name || t('Employee'),
+                    ref: latest.meta?.receipt_number || '',
+                    amount: formatTZS(latest.amount),
+                  });
+          return (
+            <div
+              role="alert"
+              className={`${barColors} px-4 sm:px-6 py-2.5 text-xs font-bold flex flex-wrap items-center justify-between gap-2 shadow-sm no-print`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <Bell className="w-4 h-4 shrink-0 animate-pulse" />
+                <span className="px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-extrabold shrink-0">
+                  {t('{count} New Alert(s)', { count: adminNotifications.length })}
+                </span>
+                <span className="truncate">{latestSummary}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleOpenNotification(latest)}
+                  className="px-3 py-1 rounded-lg bg-white text-slate-900 hover:bg-slate-100 text-[11px] font-extrabold shadow-sm transition"
+                >
+                  {t('Open & View')}
+                </button>
+                {adminNotifications.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setNotifMenuOpen(true)}
+                    className="px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white text-[11px] font-bold transition"
+                  >
+                    {t('View All ({count})', { count: adminNotifications.length })}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Opened Notification Details Modal (Already marked read & cleared from top bar) */}
+        {isAdmin && openedNotification && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 no-print">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                      openedNotification.type === 'sold_out'
+                        ? 'bg-red-100 text-red-700'
+                        : openedNotification.type === 'employee_expense'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-blue-100 text-blue-700'
+                    }`}
+                  >
+                    {openedNotification.type === 'sold_out' ? (
+                      <AlertTriangle className="w-5 h-5" />
+                    ) : (
+                      <Bell className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div>
+                    <span
+                      className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-extrabold mb-1 ${
+                        openedNotification.type === 'sold_out'
+                          ? 'bg-red-100 text-red-700'
+                          : openedNotification.type === 'employee_expense'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-blue-100 text-blue-700'
+                      }`}
+                    >
+                      {openedNotification.type === 'sold_out'
+                        ? t('Product Sold Out')
+                        : openedNotification.type === 'employee_expense'
+                          ? t('Employee Expense')
+                          : t('Employee Sale')}
+                    </span>
+                    <h3 className="text-sm font-extrabold text-slate-900">
+                      {openedNotification.type === 'sold_out'
+                        ? t('Product Sold Out: {product}', {
+                            product: openedNotification.meta?.product_name || openedNotification.title,
+                          })
+                        : openedNotification.type === 'employee_expense'
+                          ? t('Expense {ref}: {title}', {
+                              ref: openedNotification.meta?.reference_number || '',
+                              title: openedNotification.meta?.expense_title || openedNotification.title,
+                            })
+                          : t('Sale {ref}', {
+                              ref: openedNotification.meta?.receipt_number || openedNotification.title,
+                            })}
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label={t('Close')}
+                  onClick={() => setOpenedNotification(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-500">{t('Employee')}:</span>
+                  <span className="font-bold text-slate-900">{openedNotification.actor_name || '—'}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-500">{t('Time')}:</span>
+                  <span className="font-semibold text-slate-700">
+                    {formatDate(openedNotification.created_at, true)}
+                  </span>
+                </div>
+                {openedNotification.meta?.receipt_number && (
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">{t('Receipt #')}:</span>
+                    <span className="font-bold text-blue-600">{openedNotification.meta.receipt_number}</span>
+                  </div>
+                )}
+                {openedNotification.meta?.reference_number && (
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">{t('Ref #')}:</span>
+                    <span className="font-bold text-amber-700">{openedNotification.meta.reference_number}</span>
+                  </div>
+                )}
+                {openedNotification.meta?.product_name && (
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">{t('Product')}:</span>
+                    <span className="font-bold text-red-700 text-right">
+                      {openedNotification.meta.product_name} ({openedNotification.meta.sku})
+                    </span>
+                  </div>
+                )}
+                {openedNotification.meta?.items_summary && (
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">{t('Items')}:</span>
+                    <span className="font-semibold text-slate-800 text-right">
+                      {openedNotification.meta.items_summary}
+                    </span>
+                  </div>
+                )}
+                {openedNotification.meta?.customer_name && (
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">{t('Customer')}:</span>
+                    <span className="font-semibold text-slate-800">
+                      {t(openedNotification.meta.customer_name)}
+                    </span>
+                  </div>
+                )}
+                {openedNotification.meta?.category && (
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">{t('Category')}:</span>
+                    <span className="font-semibold text-slate-800">{t(openedNotification.meta.category)}</span>
+                  </div>
+                )}
+                {openedNotification.meta?.description && (
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">{t('Description')}:</span>
+                    <span className="font-semibold text-slate-800 text-right">
+                      {openedNotification.meta.description}
+                    </span>
+                  </div>
+                )}
+                {openedNotification.amount !== null && openedNotification.amount !== undefined && (
+                  <div className="flex justify-between gap-2 pt-2 border-t border-slate-200 text-sm">
+                    <span className="font-bold text-slate-700">{t('Amount')}:</span>
+                    <span className="font-extrabold text-slate-900">
+                      {formatTZS(openedNotification.amount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-[11px] text-emerald-700 font-semibold">
+                {t('Notification opened and cleared from your alert bar.')}
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleNavigateFromNotification(openedNotification)}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm"
+                >
+                  {openedNotification.type === 'sold_out'
+                    ? t('Open Inventory')
+                    : openedNotification.type === 'employee_expense'
+                      ? t('Open Expenses')
+                      : t('View Sale Receipt')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpenedNotification(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold"
+                >
+                  {t('Close')}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

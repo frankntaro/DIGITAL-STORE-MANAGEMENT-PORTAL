@@ -255,6 +255,17 @@ if ($method === 'GET' && $path === '/audit-logs') {
     OperationsSyncController::listAuditLogs($pdo, $user);
 }
 
+// Admin Notifications (Employee Sales, Sold-Out Products & Expenses)
+if ($method === 'GET' && $path === '/notifications') {
+    OperationsSyncController::listAdminNotifications($pdo, $user);
+}
+if ($method === 'POST' && $path === '/notifications/read-all') {
+    OperationsSyncController::markAllAdminNotificationsRead($pdo, $user);
+}
+if ($method === 'POST' && preg_match('#^/notifications/(\d+)/read$#', $path, $m)) {
+    OperationsSyncController::markAdminNotificationRead($pdo, $user, (int) $m[1]);
+}
+
 // Settings & Backups
 if ($method === 'GET' && $path === '/settings') {
     EmployeeSettingsController::getSettings($pdo, $user);

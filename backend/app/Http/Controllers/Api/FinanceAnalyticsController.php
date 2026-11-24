@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Services\AuditService;
 use App\Services\AuthService;
 use App\Services\FinancialService;
+use App\Services\NotificationService;
 use PDO;
 
 class FinanceAnalyticsController extends BaseApiController
@@ -441,6 +442,28 @@ class FinanceAnalyticsController extends BaseApiController
                 null,
                 ['reference_number' => $refNo, 'title' => $title, 'category' => $category, 'amount' => $amount],
                 $description ?? 'Recorded operating expense'
+            );
+
+            // Notify Shop Admin whenever an Employee records an operating expense
+            $actorName = $user['full_name'] ?? ($user['username'] ?? 'Employee');
+            NotificationService::notifyAdmin(
+                $pdo,
+                $user,
+                'employee_expense',
+                'warning',
+                "Employee Expense {$refNo}: {$title}",
+                "{$actorName} recorded expense {$refNo} ({$category}) — {$title} for TZS " . number_format($amount),
+                'Expense',
+                $expenseId,
+                $amount,
+                [
+                    'reference_number' => $refNo,
+                    'expense_title'    => $title,
+                    'category'         => $category,
+                    'payment_method'   => $paymentMethod,
+                    'expense_date'     => $expenseDate,
+                    'description'      => $description,
+                ]
             );
 
             $pdo->commit();

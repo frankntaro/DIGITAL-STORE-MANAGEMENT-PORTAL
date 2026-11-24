@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Services\AuditService;
 use App\Services\AuthService;
 use App\Services\FinancialService;
+use App\Services\NotificationService;
 use PDO;
 
 class PosCustomerDebtController extends BaseApiController
@@ -481,6 +482,60 @@ class PosCustomerDebtController extends BaseApiController
                     "Credit sale ({$paymentScenario})",
                     $deviceId
                 );
+            }
+
+            // Notify Shop Admin whenever an Employee makes a sale or sells out a product (stock hits 0)
+            $actorName = $user['full_name'] ?? ($user['username'] ?? 'Employee');
+            $customerDisplay = $customerRecord['full_name'] ?? ($walkinName !== '' ? $walkinName : 'Walk-in Customer');
+            $itemLabels = array_map(
+                fn($it) => $it['product_name_snapshot'] . ' × ' . $it['quantity'],
+                array_slice($preparedItems, 0, 3)
+            );
+            $itemsSummary = implode(', ', $itemLabels) . (count($preparedItems) > 3 ? ' +' . (count($preparedItems) - 3) : '');
+
+            NotificationService::notifyAdmin(
+                $pdo,
+                $user,
+                'employee_sale',
+                $outstandingBalance > 0 ? 'warning' : 'info',
+                "Employee Sale {$receiptNumber}",
+                "{$actorName} sold {$itemsSummary} for TZS " . number_format($totalAmount),
+                'Sale',
+                $saleId,
+                $totalAmount,
+                [
+                    'receipt_number'      => $receiptNumber,
+                    'customer_name'       => $customerDisplay,
+                    'payment_scenario'    => $paymentScenario,
+                    'payment_method'      => $paymentMethod,
+                    'items_count'         => count($preparedItems),
+                    'items_summary'       => $itemsSummary,
+                    'outstanding_balance' => $outstandingBalance,
+                ]
+            );
+
+            foreach ($preparedItems as $item) {
+                if ((float) ($item['new_stock'] ?? 0) <= 0.0001) {
+                    NotificationService::notifyAdmin(
+                        $pdo,
+                        $user,
+                        'sold_out',
+                        'critical',
+                        "Product Sold Out: {$item['product_name_snapshot']}",
+                        "{$actorName} sold out {$item['product_name_snapshot']} ({$item['sku_snapshot']}) on receipt {$receiptNumber}. Remaining stock: 0.",
+                        'Product',
+                        (int) $item['product_id'],
+                        (float) $item['line_total'],
+                        [
+                            'product_name'   => $item['product_name_snapshot'],
+                            'sku'            => $item['sku_snapshot'],
+                            'receipt_number' => $receiptNumber,
+                            'sale_id'        => $saleId,
+                            'sold_qty'       => (float) $item['quantity'],
+                            'unit'           => $item['unit_snapshot'],
+                        ]
+                    );
+                }
             }
 
             $pdo->commit();

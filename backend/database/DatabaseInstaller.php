@@ -7,7 +7,7 @@ use PDOException;
 
 class DatabaseInstaller
 {
-    private const SCHEMA_VERSION = '2026.11.25.clean-production-v1';
+    private const SCHEMA_VERSION = '2026.11.25.admin-notifications-v1';
     private const PURGE_DEMO_MIGRATION = '2026_11_25_purge_demo_data_v1';
     private static ?array $cachedConfig = null;
     private static bool $dbJustCreated = false;
@@ -453,6 +453,28 @@ class DatabaseInstaller
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ");
 
+            // Ensure admin notifications table exists (Employee sales, sold-out products & expenses)
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS `admin_notifications` (
+                  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                  `type` ENUM('employee_sale', 'sold_out', 'employee_expense') NOT NULL,
+                  `severity` ENUM('info', 'warning', 'critical') NOT NULL DEFAULT 'info',
+                  `title` VARCHAR(180) NOT NULL,
+                  `message` TEXT NOT NULL,
+                  `actor_user_id` BIGINT UNSIGNED NULL,
+                  `actor_name` VARCHAR(150) NULL,
+                  `entity_type` VARCHAR(60) NULL,
+                  `entity_id` BIGINT UNSIGNED NULL,
+                  `amount` DECIMAL(15,2) NULL,
+                  `meta_json` LONGTEXT NULL,
+                  `is_read` TINYINT(1) NOT NULL DEFAULT 0,
+                  `read_by` BIGINT UNSIGNED NULL,
+                  `read_at` TIMESTAMP NULL,
+                  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  INDEX `idx_an_read_created` (`is_read`, `created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+
             // One-time database migration tracker (persisted in MySQL so restarts never re-run one-time purges)
             $pdo->exec("
                 CREATE TABLE IF NOT EXISTS `system_migrations` (
@@ -541,6 +563,7 @@ class DatabaseInstaller
             'expenses',
             'audit_logs',
             'sync_records',
+            'admin_notifications',
         ];
 
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");

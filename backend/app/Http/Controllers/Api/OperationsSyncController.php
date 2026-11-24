@@ -521,4 +521,85 @@ class OperationsSyncController extends BaseApiController
             'results' => $results,
         ]);
     }
+
+    // ========================================================================
+    // ADMIN REAL-TIME NOTIFICATIONS (Employee Sales, Sold-Out & Expenses)
+    // ========================================================================
+    private static function requireAdminOwner(array $user): void
+    {
+        if (!in_array('owner', $user['role_slugs'] ?? [], true)) {
+            self::error('Access denied: Admin notifications are reserved for the Shop Admin.', 403);
+        }
+    }
+
+    public static function listAdminNotifications(PDO $pdo, array $user): never
+    {
+        self::requireAdminOwner($user);
+
+        $rows = $pdo->query("
+            SELECT *
+            FROM `admin_notifications`
+            WHERE `is_read` = 0
+            ORDER BY `id` DESC
+            LIMIT 50
+        ")->fetchAll();
+
+        $notifications = [];
+        foreach ($rows as $row) {
+            $notifications[] = [
+                'id'            => (int) $row['id'],
+                'type'          => $row['type'],
+                'severity'      => $row['severity'],
+                'title'         => $row['title'],
+                'message'       => $row['message'],
+                'actor_user_id' => $row['actor_user_id'] !== null ? (int) $row['actor_user_id'] : null,
+                'actor_name'    => $row['actor_name'],
+                'entity_type'   => $row['entity_type'],
+                'entity_id'     => $row['entity_id'] !== null ? (int) $row['entity_id'] : null,
+                'amount'        => $row['amount'] !== null ? (float) $row['amount'] : null,
+                'meta'          => $row['meta_json'] ? (json_decode((string) $row['meta_json'], true) ?: []) : [],
+                'created_at'    => $row['created_at'],
+            ];
+        }
+
+        self::json([
+            'success'       => true,
+            'unread_count'  => count($notifications),
+            'notifications' => $notifications,
+        ]);
+    }
+
+    public static function markAdminNotificationRead(PDO $pdo, array $user, int $notificationId): never
+    {
+        self::requireAdminOwner($user);
+
+        $pdo->prepare("
+            UPDATE `admin_notifications`
+            SET `is_read` = 1, `read_by` = ?, `read_at` = NOW()
+            WHERE `id` = ? AND `is_read` = 0
+        ")->execute([(int) $user['id'], $notificationId]);
+
+        $remaining = (int) $pdo->query("SELECT COUNT(*) FROM `admin_notifications` WHERE `is_read` = 0")->fetchColumn();
+
+        self::json([
+            'success'      => true,
+            'unread_count' => $remaining,
+        ]);
+    }
+
+    public static function markAllAdminNotificationsRead(PDO $pdo, array $user): never
+    {
+        self::requireAdminOwner($user);
+
+        $pdo->prepare("
+            UPDATE `admin_notifications`
+            SET `is_read` = 1, `read_by` = ?, `read_at` = NOW()
+            WHERE `is_read` = 0
+        ")->execute([(int) $user['id']]);
+
+        self::json([
+            'success'      => true,
+            'unread_count' => 0,
+        ]);
+    }
 }

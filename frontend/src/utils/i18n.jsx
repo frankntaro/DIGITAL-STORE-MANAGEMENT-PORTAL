@@ -1554,6 +1554,32 @@ export const SW_DICTIONARY = {
   'Stock transfer record not found.': 'Kumbukumbu ya uhamisho wa bidhaa haikupatikana.',
   'Only in-transit transfers can be marked as received.': 'Uhamisho ulio njiani pekee ndio unaoweza kuthibitishwa kupokelewa.',
   'Only in-transit transfers can be cancelled and restocked.': 'Uhamisho ulio njiani pekee ndio unaoweza kughairiwa na kurudishwa hisa.',
+
+  // Admin Real-Time Top-of-App Notifications (Employee Sales, Sold-Out & Expenses)
+  'Admin Notifications': 'Arifa za Msimamizi',
+  'Admin Notifications ({count})': 'Arifa za Msimamizi ({count})',
+  'Click a notification to view details and clear it': 'Bofya arifa ili kuona maelezo na kuiondoa',
+  'Clear All': 'Futa Zote',
+  'No new notifications — all caught up!': 'Hakuna arifa mpya — umeshakagua zote!',
+  'Product Sold Out': 'Bidhaa Imeisha Hisa',
+  'Product Sold Out: {product}': 'Bidhaa Imeisha Hisa: {product}',
+  'Employee Expense': 'Matumizi ya Mfanyakazi',
+  'Employee Sale': 'Mauzo ya Mfanyakazi',
+  'Expense {ref}: {title}': 'Matumizi {ref}: {title}',
+  'Sale {ref}': 'Mauzo {ref}',
+  '{actor} sold out {product} (0 remaining)': '{actor} ameisha hisa ya {product} (zimebaki 0)',
+  '{actor} recorded expense {title} ({amount})': '{actor} amerekodi matumizi {title} ({amount})',
+  '{actor} completed sale {ref} ({amount})': '{actor} amekamilisha mauzo {ref} ({amount})',
+  '{count} New Alert(s)': 'Arifa Mpya {count}',
+  'Open & View': 'Fungua na Tazama',
+  'View All ({count})': 'Tazama Zote ({count})',
+  'Time': 'Muda',
+  'Amount': 'Kiasi',
+  'Notification opened and cleared from your alert bar.': 'Arifa imefunguliwa na kuondolewa kwenye mstari wa arifa.',
+  'Open Inventory': 'Fungua Ghala',
+  'Open Expenses': 'Fungua Matumizi',
+  'View Sale Receipt': 'Tazama Risiti ya Mauzo',
+  'Access denied: Admin notifications are reserved for the Shop Admin.': 'Ufikiaji umezuiwa: Arifa za msimamizi ni za Msimamizi wa Duka pekee.',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY

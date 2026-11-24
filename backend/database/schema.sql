@@ -615,4 +615,24 @@ CREATE TABLE IF NOT EXISTS `system_migrations` (
   `applied_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 33. ADMIN REAL-TIME NOTIFICATIONS (Employee Sales, Sold-Out Products & Expenses)
+CREATE TABLE IF NOT EXISTS `admin_notifications` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `type` ENUM('employee_sale', 'sold_out', 'employee_expense') NOT NULL,
+  `severity` ENUM('info', 'warning', 'critical') NOT NULL DEFAULT 'info',
+  `title` VARCHAR(180) NOT NULL,
+  `message` TEXT NOT NULL,
+  `actor_user_id` BIGINT UNSIGNED NULL,
+  `actor_name` VARCHAR(150) NULL,
+  `entity_type` VARCHAR(60) NULL,
+  `entity_id` BIGINT UNSIGNED NULL,
+  `amount` DECIMAL(15,2) NULL,
+  `meta_json` LONGTEXT NULL,
+  `is_read` TINYINT(1) NOT NULL DEFAULT 0,
+  `read_by` BIGINT UNSIGNED NULL,
+  `read_at` TIMESTAMP NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_an_read_created` (`is_read`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
