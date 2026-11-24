@@ -1453,6 +1453,107 @@ export const SW_DICTIONARY = {
   'Report shared successfully!': 'Ripoti imeshirikiwa kikamilifu!',
   'Sales, Customer, and Employee operational reports with PDF, Excel & instant sharing': 'Ripoti za uendeshaji za Mauzo, Wateja na Wafanyakazi zenye PDF, Excel na kushiriki papo hapo',
   'Access denied: Inventory & valuation reports are reserved for the Shop Admin.': 'Ufikiaji umezuiwa: Ripoti za ghala na thamani ya hisa ni za Msimamizi wa Duka pekee.',
+
+  // Inter-Shop Product / Stock Transfers (Kuhamisha Bidhaa Kwenda Duka Lingine)
+  'Transfer Products': 'Hamisha Bidhaa',
+  'Transfer Product': 'Hamisha Bidhaa',
+  'Transfer': 'Hamisha',
+  'Transfer Product to Another Shop': 'Hamisha Bidhaa Kwenda Duka Lingine',
+  'Transfer Products to Another Shop': 'Hamisha Bidhaa Kwenda Duka Lingine',
+  'Dispatch products from {shop} to another shop/branch with receiver, carrier, IMEI/serial & printable delivery note': 'Tuma bidhaa kutoka {shop} kwenda duka au tawi lingine pamoja na taarifa za mpokeaji, mchukuzi, IMEI/serial na hati ya uhamisho',
+  '+ New Product Transfer': '+ Hamisha Bidhaa Mpya',
+  'Close Transfer Form': 'Funga Fomu ya Uhamisho',
+  'New Inter-Shop Stock Transfer': 'Uhamisho Mpya wa Bidhaa Kwenda Duka Lingine',
+  'From: {shop} — Stock is deducted automatically upon confirmation': 'Kutoka: {shop} — Hisa itapunguzwa kiotomatiki mara tu unapothibitisha',
+  '1. Destination Shop & Receiver Information': '1. Taarifa za Duka Lengwa na Mpokeaji',
+  '2. Dispatch, Reason & Transport Details': '2. Taarifa za Utoaji, Sababu na Usafirishaji',
+  '3. Products to Transfer': '3. Bidhaa za Kuhamisha',
+  'Destination Shop / Branch Name': 'Jina la Duka / Tawi Lengwa',
+  'Destination Shop': 'Duka Lengwa',
+  'Destination Shop & Receiver': 'Duka Lengwa na Mpokeaji',
+  'Destination Location': 'Mahali Lilipo Duka Lengwa',
+  'Destination Location / Address': 'Mahali / Anwani ya Duka Lengwa',
+  'e.g. Kampango Branch 2 — Kariakoo': 'mf. Kampango Tawi la 2 — Kariakoo',
+  'e.g. Aggrey Street / Mwanza / Arusha': 'mf. Mtaa wa Aggrey / Mwanza / Arusha',
+  'Receiver': 'Mpokeaji',
+  'Receiver Name': 'Jina la Mpokeaji',
+  'Person receiving the goods': 'Mtu anayepokea bidhaa',
+  'Receiver Phone': 'Namba ya Simu ya Mpokeaji',
+  'Transfer Date': 'Tarehe ya Uhamisho',
+  'Transfer Reason': 'Sababu ya Kuhamisha',
+  'Delivery Status': 'Hali ya Uwasilishaji',
+  'In Transit': 'Njiani (Haijafika)',
+  'in_transit': 'Njiani',
+  'In Transit (Confirm Upon Arrival)': 'Njiani (Thibitisha Mzigo Ukifika)',
+  'Delivered / Received Immediately': 'Imefika / Imepokelewa Mara Moja',
+  'Carrier / Driver': 'Mchukuzi / Dereva',
+  'Carrier / Driver / Staff Name': 'Jina la Mchukuzi / Dereva / Mfanyakazi',
+  'e.g. Bodaboda / Bus Courier / Staff name': 'mf. Bodaboda / Basi / Jina la Mfanyakazi',
+  'Carrier Phone': 'Simu ya Mchukuzi',
+  'Vehicle / Bus / Waybill #': 'Namba ya Gari / Basi / Risiti ya Mzigo',
+  'Vehicle / Waybill #': 'Gari / Risiti ya Mzigo #',
+  'e.g. T 123 ABC / Waybill #442': 'mf. T 123 ABC / Risiti #442',
+  'Carrier & Reason': 'Mchukuzi na Sababu',
+  'Add Another Product': 'Ongeza Bidhaa Nyingine',
+  '-- Select Product --': '-- Chagua Bidhaa --',
+  'Serial / IMEI (Optional)': 'Namba ya Serial / IMEI (Hiari)',
+  'e.g. IMEI / S/N': 'mf. IMEI / S/N',
+  'No in-stock products available to transfer right now.': 'Hakuna bidhaa zenye hisa za kuhamisha kwa sasa.',
+  'No inter-shop product transfers recorded yet.': 'Bado hakuna uhamisho wa bidhaa uliorekodiwa.',
+  'Loading transfers...': 'Inapakia orodha ya uhamisho...',
+  'Additional Transfer Notes (Optional)': 'Maelezo ya Ziada ya Uhamisho (Hiari)',
+  'e.g. Includes sealed boxes, warranty cards, charger cables...': 'mf. Ina maboksi yaliyofungwa, kadi za dhamana, nyaya za chaja...',
+  'Confirm & Transfer Products': 'Thibitisha na Hamisha Bidhaa',
+  'Transferring...': 'Inahamisha...',
+  'All Transfers': 'Uhamisho Wote',
+  'Total Transfers': 'Jumla ya Uhamisho',
+  'Total Cost Transferred': 'Jumla ya Gharama Iliyohamishwa',
+  'Total Retail Value Transferred': 'Jumla ya Thamani ya Mauzo Iliyohamishwa',
+  'Total Units to Transfer': 'Jumla ya Idadi ya Kuhamisha',
+  'Total Units': 'Jumla ya Idadi',
+  'Total Items / Units': 'Jumla ya Aina / Idadi',
+  'Total Cost Value': 'Jumla ya Thamani ya Gharama',
+  'Total Retail Value': 'Jumla ya Thamani ya Mauzo',
+  'Total Value': 'Jumla ya Thamani',
+  'Retail Value': 'Thamani ya Mauzo',
+  'Cost Total': 'Jumla ya Gharama',
+  'Unit Cost': 'Gharama kwa Moja',
+  'Cost': 'Gharama',
+  'From Shop': 'Kutoka Duka',
+  'Transfer #': 'Namba ya Uhamisho',
+  'Transfer # & Date': 'Uhamisho # na Tarehe',
+  'Products Transferred': 'Bidhaa Zilizohamishwa',
+  'Transferred Products': 'Bidhaa Zilizohamishwa',
+  'Transfer Recorded: {ref}': 'Uhamisho Umerekodiwa: {ref}',
+  'STOCK TRANSFER DELIVERY NOTE': 'HATI YA UHAMISHO WA BIDHAA',
+  'Verified Inter-Shop Stock Transfer Document': 'Hati Rasmi Iliyothibitishwa ya Uhamisho wa Bidhaa',
+  'Dispatched By': 'Imetumwa Na',
+  'Received By': 'Imepokelewa Na',
+  'Print Note': 'Chapisha Hati',
+  'Mark as Received': 'Thibitisha Imepokelewa',
+  'Cancel & Restock': 'Ghairi na Rudisha Hisa',
+  'Cancel transfer {ref} and return all transferred items back into your shop stock?': 'Ghairi uhamisho {ref} na urudishe bidhaa zote kwenye hisa za duka lako?',
+  'Stock transfers history': 'Historia ya uhamisho wa bidhaa',
+  'Transferring products to another shop can only be performed by the Shop Administrator.': 'Kuhamisha bidhaa kwenda duka lingine kunaweza kufanywa na Msimamizi wa Duka pekee.',
+  'Branch Restock': 'Kuongeza Hisa Tawi Lingine',
+  'Stock Balancing': 'Kusawazisha Hisa Kati ya Maduka',
+  'Customer Order Transfer': 'Uhamisho wa Agizo la Mteja',
+  'Showroom / Display Transfer': 'Uhamisho wa Maonyesho Dukani',
+  'Emergency Shop Request': 'Ombi la Dharura la Duka Lingine',
+  'Other': 'Nyingine',
+  'transfer_out': 'Uhamisho Kwenda Duka Lingine',
+  'transfer_cancel_return': 'Marejesho ya Uhamisho Uliofutwa',
+  'StockTransfer': 'Uhamisho wa Bidhaa',
+  'stock.transferred_out': 'Bidhaa Zimehamishwa Kwenda Duka Lingine',
+  'stock.transfer_received': 'Uhamisho wa Bidhaa Umethibitishwa Kupokelewa',
+  'stock.transfer_cancelled': 'Uhamisho wa Bidhaa Umeghairiwa (Hisa Imerudishwa)',
+  'Destination shop name and receiver name are required.': 'Jina la duka lengwa na jina la mpokeaji vinahitajika.',
+  'At least one product item is required to complete a transfer.': 'Angalau bidhaa moja inahitajika kukamilisha uhamisho.',
+  'Every transferred product must have a valid product selection and positive quantity.': 'Kila bidhaa inayohamishwa lazima iwe sahihi na idadi zaidi ya sifuri.',
+  'One of the selected products was not found or is archived.': 'Moja ya bidhaa zilizochaguliwa haikupatikana au imehifadhiwa.',
+  'Stock transfer record not found.': 'Kumbukumbu ya uhamisho wa bidhaa haikupatikana.',
+  'Only in-transit transfers can be marked as received.': 'Uhamisho ulio njiani pekee ndio unaoweza kuthibitishwa kupokelewa.',
+  'Only in-transit transfers can be cancelled and restocked.': 'Uhamisho ulio njiani pekee ndio unaoweza kughairiwa na kurudishwa hisa.',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY
@@ -1515,6 +1616,22 @@ function translateDynamicSw(text) {
   }
   if ((m = text.match(/^Username updated from\s+(@\S+)\s+to\s+(@\S+)\s+successfully\.?$/i))) {
     return `Jina la mtumiaji limebadilishwa kutoka ${m[1]} kwenda ${m[2]} kikamilifu.`;
+  }
+  if ((m = text.match(/^Transfer\s+(.+?)\s+recorded successfully and shop stock updated\.?$/i))) {
+    return `Uhamisho ${m[1]} umerekodiwa kikamilifu na hisa ya duka imesasishwa.`;
+  }
+  if ((m = text.match(/^Transfer\s+(.+?)\s+marked as received\.?$/i))) {
+    return `Uhamisho ${m[1]} umethibitishwa kuwa umepokelewa.`;
+  }
+  if ((m = text.match(/^Transfer\s+(.+?)\s+cancelled and stock restored to inventory\.?$/i))) {
+    return `Uhamisho ${m[1]} umeghairiwa na hisa imerudishwa ghalani.`;
+  }
+  if ((m = text.match(/^Transferred to\s+(.+?)\s*\((.+?)\)$/i))) {
+    const rsn = SW_DICTIONARY[m[2]] || LOWER_SW_MAP[m[2].toLowerCase()] || m[2];
+    return `Imehamishwa kwenda ${m[1]} (${rsn})`;
+  }
+  if ((m = text.match(/^Cancelled transfer\s+(.+?)\s+—\s+stock returned to shop$/i))) {
+    return `Uhamisho ${m[1]} umeghairiwa — hisa imerudishwa dukani`;
   }
   if ((m = text.match(/^Cash session\s+(.+?)\s+opened with TZS\s+(.+?)\.?$/i))) {
     return `Zamu ya fedha ${m[1]} imefunguliwa kwa kianzio cha TZS ${m[2]}.`;

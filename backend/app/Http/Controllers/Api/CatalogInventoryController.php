@@ -1436,4 +1436,401 @@ class CatalogInventoryController extends BaseApiController
             self::error('Failed to record stock adjustment: ' . $e->getMessage(), 500);
         }
     }
+
+    // ========================================================================
+    // INTER-SHOP STOCK TRANSFERS (Transfer Products to Another Shop / Branch)
+    // ========================================================================
+    private static function hydrateTransfersWithItems(PDO $pdo, array $transfers): array
+    {
+        if (empty($transfers)) {
+            return [];
+        }
+        $ids = array_map(fn($r) => (int) $r['id'], $transfers);
+        $inList = implode(',', $ids);
+        $itemsRows = $pdo->query("
+            SELECT * FROM `stock_transfer_items`
+            WHERE `transfer_id` IN ({$inList})
+            ORDER BY `id` ASC
+        ")->fetchAll();
+
+        $byTransfer = [];
+        foreach ($itemsRows as $it) {
+            $byTransfer[(int) $it['transfer_id']][] = $it;
+        }
+        foreach ($transfers as &$tr) {
+            $tr['items'] = $byTransfer[(int) $tr['id']] ?? [];
+        }
+        unset($tr);
+        return $transfers;
+    }
+
+    public static function listStockTransfers(PDO $pdo, array $user): never
+    {
+        self::requirePermission($user, 'inventory.adjust');
+
+        $statusFilter = trim((string) ($_GET['status'] ?? ''));
+        $where = '';
+        $params = [];
+        if (in_array($statusFilter, ['in_transit', 'received', 'cancelled'], true)) {
+            $where = 'WHERE st.`status` = ?';
+            $params[] = $statusFilter;
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT st.*,
+                   u1.`full_name` AS transferred_by_name,
+                   u2.`full_name` AS received_confirmed_by_name
+            FROM `stock_transfers` st
+            LEFT JOIN `users` u1 ON u1.`id` = st.`transferred_by`
+            LEFT JOIN `users` u2 ON u2.`id` = st.`received_confirmed_by`
+            {$where}
+            ORDER BY st.`id` DESC
+            LIMIT 200
+        ");
+        $stmt->execute($params);
+        $transfers = self::hydrateTransfersWithItems($pdo, $stmt->fetchAll());
+
+        $summaryRow = $pdo->query("
+            SELECT
+                COUNT(*) AS total_transfers,
+                SUM(CASE WHEN `status` = 'in_transit' THEN 1 ELSE 0 END) AS in_transit_count,
+                SUM(CASE WHEN `status` = 'received' THEN 1 ELSE 0 END) AS received_count,
+                COALESCE(SUM(CASE WHEN `status` != 'cancelled' THEN `total_cost_value` ELSE 0 END), 0) AS total_cost_transferred,
+                COALESCE(SUM(CASE WHEN `status` != 'cancelled' THEN `total_retail_value` ELSE 0 END), 0) AS total_retail_transferred
+            FROM `stock_transfers`
+        ")->fetch() ?: [];
+
+        self::json([
+            'success'   => true,
+            'transfers' => $transfers,
+            'summary'   => [
+                'total_transfers'          => (int) ($summaryRow['total_transfers'] ?? 0),
+                'in_transit_count'         => (int) ($summaryRow['in_transit_count'] ?? 0),
+                'received_count'           => (int) ($summaryRow['received_count'] ?? 0),
+                'total_cost_transferred'   => (float) ($summaryRow['total_cost_transferred'] ?? 0),
+                'total_retail_transferred' => (float) ($summaryRow['total_retail_transferred'] ?? 0),
+            ],
+        ]);
+    }
+
+    public static function createStockTransfer(PDO $pdo, array $user): never
+    {
+        self::requirePermission($user, 'inventory.adjust');
+        $data = self::input();
+
+        $destShop = trim((string) ($data['destination_shop_name'] ?? ''));
+        $destLocation = trim((string) ($data['destination_location'] ?? '')) ?: null;
+        $receiverName = trim((string) ($data['receiver_name'] ?? ''));
+        $receiverPhone = trim((string) ($data['receiver_phone'] ?? '')) ?: null;
+        $carrierName = trim((string) ($data['carrier_name'] ?? '')) ?: null;
+        $carrierPhone = trim((string) ($data['carrier_phone'] ?? '')) ?: null;
+        $vehicleOrWaybill = trim((string) ($data['vehicle_or_waybill'] ?? '')) ?: null;
+        $transferReason = trim((string) ($data['transfer_reason'] ?? '')) ?: 'Branch Restock';
+        $transferDate = trim((string) ($data['transfer_date'] ?? '')) ?: date('Y-m-d');
+        $status = (($data['status'] ?? 'in_transit') === 'received') ? 'received' : 'in_transit';
+        $notes = trim((string) ($data['notes'] ?? '')) ?: null;
+        $items = $data['items'] ?? [];
+
+        if ($destShop === '' || $receiverName === '') {
+            self::error('Destination shop name and receiver name are required.', 422);
+        }
+        if (!is_array($items) || count($items) === 0) {
+            self::error('At least one product item is required to complete a transfer.', 422);
+        }
+
+        $shopName = (string) ($pdo->query("SELECT `shop_name` FROM `shop_settings` ORDER BY `id` ASC LIMIT 1")->fetchColumn() ?: 'KAMPANGO PHONES AND ELECTRONICS');
+
+        $pdo->beginTransaction();
+        try {
+            $transferNumber = self::nextUniqueCode($pdo, 'stock_transfers', 'transfer_number', 'TRF-', 4, 1);
+
+            $prodStmt = $pdo->prepare("
+                SELECT p.`id`, p.`sku`, p.`name`, p.`unit`, p.`selling_price`, p.`purchase_price`, p.`weighted_avg_cost`,
+                       i.`available_quantity`, i.`unit_cost`
+                FROM `products` p
+                INNER JOIN `inventories` i ON i.`product_id` = p.`id`
+                WHERE p.`id` = ? AND p.`status` = 'active'
+                FOR UPDATE
+            ");
+
+            $preparedItems = [];
+            $totalQty = 0.0;
+            $totalCost = 0.0;
+            $totalRetail = 0.0;
+            $runningStock = [];
+
+            foreach ($items as $rawItem) {
+                $pid = (int) ($rawItem['product_id'] ?? 0);
+                $qty = round((float) ($rawItem['quantity'] ?? 0), 2);
+                $serial = trim((string) ($rawItem['serial_or_imei'] ?? '')) ?: null;
+
+                if ($pid <= 0 || $qty <= 0) {
+                    $pdo->rollBack();
+                    self::error('Every transferred product must have a valid product selection and positive quantity.', 422);
+                }
+
+                $prodStmt->execute([$pid]);
+                $prod = $prodStmt->fetch();
+                if (!$prod) {
+                    $pdo->rollBack();
+                    self::error('One of the selected products was not found or is archived.', 404);
+                }
+
+                $unit = strtolower((string) ($prod['unit'] ?? 'piece'));
+                if ($unit !== 'meter' && abs($qty - round($qty)) > 0.0001) {
+                    $pdo->rollBack();
+                    self::error("Product {$prod['name']} is sold in whole pieces. Please enter a whole number quantity.", 422);
+                }
+
+                $currentAvail = array_key_exists($pid, $runningStock)
+                    ? $runningStock[$pid]
+                    : round((float) $prod['available_quantity'], 2);
+
+                if ($qty > $currentAvail) {
+                    $pdo->rollBack();
+                    self::error("Insufficient stock for {$prod['name']}. Available: {$currentAvail}, Requested: {$qty}.", 422);
+                }
+
+                $newAvail = round($currentAvail - $qty, 2);
+                $runningStock[$pid] = $newAvail;
+
+                $unitCost = (float) ($prod['unit_cost'] ?: $prod['weighted_avg_cost'] ?: $prod['purchase_price'] ?: 0);
+                $unitSell = (float) ($prod['selling_price'] ?? 0);
+                $lineCost = round($qty * $unitCost, 2);
+                $lineRetail = round($qty * $unitSell, 2);
+
+                $totalQty = round($totalQty + $qty, 2);
+                $totalCost = round($totalCost + $lineCost, 2);
+                $totalRetail = round($totalRetail + $lineRetail, 2);
+
+                $preparedItems[] = [
+                    'product_id'         => $pid,
+                    'product_name'       => (string) $prod['name'],
+                    'sku'                => (string) $prod['sku'],
+                    'unit'               => (string) ($prod['unit'] ?: 'piece'),
+                    'quantity'           => $qty,
+                    'prev_qty'           => $currentAvail,
+                    'new_qty'            => $newAvail,
+                    'unit_cost'          => $unitCost,
+                    'unit_selling_price' => $unitSell,
+                    'line_cost_total'    => $lineCost,
+                    'line_retail_total'  => $lineRetail,
+                    'serial_or_imei'     => $serial,
+                ];
+            }
+
+            $receivedBy = $status === 'received' ? (int) $user['id'] : null;
+            $receivedAt = $status === 'received' ? date('Y-m-d H:i:s') : null;
+
+            $pdo->prepare("
+                INSERT INTO `stock_transfers` (
+                    `transfer_number`, `transfer_date`, `from_shop`, `destination_shop_name`, `destination_location`,
+                    `receiver_name`, `receiver_phone`, `carrier_name`, `carrier_phone`, `vehicle_or_waybill`,
+                    `transfer_reason`, `status`, `total_items`, `total_quantity`, `total_cost_value`,
+                    `total_retail_value`, `notes`, `transferred_by`, `received_confirmed_by`, `received_at`
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ")->execute([
+                $transferNumber, $transferDate, $shopName, $destShop, $destLocation,
+                $receiverName, $receiverPhone, $carrierName, $carrierPhone, $vehicleOrWaybill,
+                $transferReason, $status, count($preparedItems), $totalQty, $totalCost,
+                $totalRetail, $notes, (int) $user['id'], $receivedBy, $receivedAt
+            ]);
+            $transferId = (int) $pdo->lastInsertId();
+
+            $insItem = $pdo->prepare("
+                INSERT INTO `stock_transfer_items` (
+                    `transfer_id`, `product_id`, `product_name_snapshot`, `sku_snapshot`, `unit_snapshot`,
+                    `quantity`, `unit_cost`, `unit_selling_price`, `line_cost_total`, `line_retail_total`, `serial_or_imei`
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $updInv = $pdo->prepare("UPDATE `inventories` SET `available_quantity` = ? WHERE `product_id` = ?");
+            $insSm = $pdo->prepare("
+                INSERT INTO `stock_movements` (
+                    `uuid`, `product_id`, `movement_type`, `previous_quantity`, `change_quantity`,
+                    `new_quantity`, `unit_cost`, `reference_type`, `reference_id`, `reason`, `notes`, `user_id`, `approved_by`
+                ) VALUES (?, ?, 'transfer_out', ?, ?, ?, ?, 'StockTransfer', ?, ?, ?, ?, ?)
+            ");
+
+            foreach ($preparedItems as $item) {
+                $insItem->execute([
+                    $transferId, $item['product_id'], $item['product_name'], $item['sku'], $item['unit'],
+                    $item['quantity'], $item['unit_cost'], $item['unit_selling_price'],
+                    $item['line_cost_total'], $item['line_retail_total'], $item['serial_or_imei']
+                ]);
+                $updInv->execute([$item['new_qty'], $item['product_id']]);
+
+                $mvNoteParts = array_filter([
+                    "Ref: {$transferNumber}",
+                    "Receiver: {$receiverName}" . ($receiverPhone ? " ({$receiverPhone})" : ''),
+                    $carrierName ? "Carrier: {$carrierName}" : null,
+                    $item['serial_or_imei'] ? "Serial/IMEI: {$item['serial_or_imei']}" : null,
+                    $notes,
+                ]);
+                $insSm->execute([
+                    self::uuid('sm'), $item['product_id'], $item['prev_qty'], -$item['quantity'],
+                    $item['new_qty'], $item['unit_cost'], $transferId,
+                    "Transferred to {$destShop} ({$transferReason})",
+                    implode(' | ', $mvNoteParts),
+                    (int) $user['id'], (int) $user['id']
+                ]);
+            }
+
+            AuditService::log(
+                $pdo,
+                (int) $user['id'],
+                'stock.transferred_out',
+                'StockTransfer',
+                $transferId,
+                null,
+                [
+                    'transfer_number'       => $transferNumber,
+                    'destination_shop_name' => $destShop,
+                    'receiver_name'         => $receiverName,
+                    'total_items'           => count($preparedItems),
+                    'total_quantity'        => $totalQty,
+                    'total_cost_value'      => $totalCost,
+                ],
+                "Transferred {$totalQty} unit(s) to {$destShop} ({$transferNumber})"
+            );
+
+            $pdo->commit();
+
+            $createdStmt = $pdo->prepare("
+                SELECT st.*,
+                       u1.`full_name` AS transferred_by_name,
+                       u2.`full_name` AS received_confirmed_by_name
+                FROM `stock_transfers` st
+                LEFT JOIN `users` u1 ON u1.`id` = st.`transferred_by`
+                LEFT JOIN `users` u2 ON u2.`id` = st.`received_confirmed_by`
+                WHERE st.`id` = ?
+                LIMIT 1
+            ");
+            $createdStmt->execute([$transferId]);
+            $hydrated = self::hydrateTransfersWithItems($pdo, [$createdStmt->fetch()]);
+
+            self::json([
+                'success'  => true,
+                'message'  => "Transfer {$transferNumber} recorded successfully and shop stock updated.",
+                'transfer' => $hydrated[0] ?? null,
+            ], 201);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            self::error('Failed to record product transfer: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public static function markTransferReceived(PDO $pdo, array $user, int $transferId): never
+    {
+        self::requirePermission($user, 'inventory.adjust');
+
+        $stmt = $pdo->prepare("SELECT * FROM `stock_transfers` WHERE `id` = ? LIMIT 1");
+        $stmt->execute([$transferId]);
+        $tr = $stmt->fetch();
+        if (!$tr) {
+            self::error('Stock transfer record not found.', 404);
+        }
+        if ($tr['status'] !== 'in_transit') {
+            self::error('Only in-transit transfers can be marked as received.', 422);
+        }
+
+        $pdo->prepare("
+            UPDATE `stock_transfers`
+            SET `status` = 'received', `received_confirmed_by` = ?, `received_at` = NOW()
+            WHERE `id` = ?
+        ")->execute([(int) $user['id'], $transferId]);
+
+        AuditService::log(
+            $pdo,
+            (int) $user['id'],
+            'stock.transfer_received',
+            'StockTransfer',
+            $transferId,
+            ['status' => 'in_transit'],
+            ['status' => 'received'],
+            "Confirmed transfer {$tr['transfer_number']} received at {$tr['destination_shop_name']}"
+        );
+
+        self::json([
+            'success' => true,
+            'message' => "Transfer {$tr['transfer_number']} marked as received.",
+        ]);
+    }
+
+    public static function cancelStockTransfer(PDO $pdo, array $user, int $transferId): never
+    {
+        self::requirePermission($user, 'inventory.adjust');
+
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare("SELECT * FROM `stock_transfers` WHERE `id` = ? FOR UPDATE");
+            $stmt->execute([$transferId]);
+            $tr = $stmt->fetch();
+            if (!$tr) {
+                $pdo->rollBack();
+                self::error('Stock transfer record not found.', 404);
+            }
+            if ($tr['status'] !== 'in_transit') {
+                $pdo->rollBack();
+                self::error('Only in-transit transfers can be cancelled and restocked.', 422);
+            }
+
+            $itemsStmt = $pdo->prepare("SELECT * FROM `stock_transfer_items` WHERE `transfer_id` = ? ORDER BY `id` ASC");
+            $itemsStmt->execute([$transferId]);
+            $items = $itemsStmt->fetchAll();
+
+            $invLock = $pdo->prepare("SELECT `available_quantity`, `unit_cost` FROM `inventories` WHERE `product_id` = ? FOR UPDATE");
+            $updInv = $pdo->prepare("UPDATE `inventories` SET `available_quantity` = ? WHERE `product_id` = ?");
+            $insSm = $pdo->prepare("
+                INSERT INTO `stock_movements` (
+                    `uuid`, `product_id`, `movement_type`, `previous_quantity`, `change_quantity`,
+                    `new_quantity`, `unit_cost`, `reference_type`, `reference_id`, `reason`, `notes`, `user_id`, `approved_by`
+                ) VALUES (?, ?, 'transfer_cancel_return', ?, ?, ?, ?, 'StockTransfer', ?, ?, ?, ?, ?)
+            ");
+
+            foreach ($items as $it) {
+                $pid = (int) $it['product_id'];
+                $qty = round((float) $it['quantity'], 2);
+                $invLock->execute([$pid]);
+                $inv = $invLock->fetch();
+                if ($inv) {
+                    $prevQty = round((float) $inv['available_quantity'], 2);
+                    $newQty = round($prevQty + $qty, 2);
+                    $updInv->execute([$newQty, $pid]);
+                    $insSm->execute([
+                        self::uuid('sm'), $pid, $prevQty, $qty, $newQty, (float) $inv['unit_cost'],
+                        $transferId,
+                        "Cancelled transfer {$tr['transfer_number']} — stock returned to shop",
+                        "Originally destined for {$tr['destination_shop_name']}",
+                        (int) $user['id'], (int) $user['id']
+                    ]);
+                }
+            }
+
+            $pdo->prepare("UPDATE `stock_transfers` SET `status` = 'cancelled' WHERE `id` = ?")->execute([$transferId]);
+
+            AuditService::log(
+                $pdo,
+                (int) $user['id'],
+                'stock.transfer_cancelled',
+                'StockTransfer',
+                $transferId,
+                ['status' => 'in_transit'],
+                ['status' => 'cancelled'],
+                "Cancelled transfer {$tr['transfer_number']} and restored stock"
+            );
+
+            $pdo->commit();
+            self::json([
+                'success' => true,
+                'message' => "Transfer {$tr['transfer_number']} cancelled and stock restored to inventory.",
+            ]);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            self::error('Failed to cancel transfer: ' . $e->getMessage(), 500);
+        }
+    }
 }

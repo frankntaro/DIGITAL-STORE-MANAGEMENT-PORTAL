@@ -2,19 +2,26 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
+  ArrowRightLeft,
   Boxes,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
   Edit3,
   FolderKanban,
   Globe,
   Image,
+  MessageCircle,
   PackagePlus,
   Plus,
+  Printer,
   RefreshCw,
   RotateCcw,
   Search,
+  Share2,
   SlidersHorizontal,
+  Trash2,
   Truck,
   UploadCloud,
   X,
@@ -29,6 +36,7 @@ import {
   formatUnitPrice,
   hasPermission,
   isMeterUnit,
+  printHtmlDocument,
 } from '../utils/format';
 import { useLanguage } from '../utils/i18n';
 import Pagination, { usePagination } from '../components/Pagination';
@@ -45,6 +53,7 @@ export function ProductsScreen({
   onAddProduct,
   onEditProduct,
   onOrderFromSupplier,
+  onTransferProduct,
 }) {
   const { t } = useLanguage();
   const [products, setProducts] = useState([]);
@@ -109,6 +118,7 @@ export function ProductsScreen({
   const isAdmin = (user?.role_slugs || []).includes('owner');
   const canManage = hasPermission(user, 'products.manage');
   const canOrder = hasPermission(user, 'purchases.manage');
+  const canTransfer = hasPermission(user, 'inventory.adjust');
   const productsPg = usePagination(
     products,
     5,
@@ -124,15 +134,26 @@ export function ProductsScreen({
             {t('Quantity-based stock management with soft archiving to preserve historical sales')}
           </p>
         </div>
-        {canManage && (
-          <button
-            type="button"
-            onClick={onAddProduct}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm"
-          >
-            <Plus className="w-4 h-4" /> {t('Add Product')}
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {canTransfer && onTransferProduct && (
+            <button
+              type="button"
+              onClick={() => onTransferProduct(null)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition"
+            >
+              <ArrowRightLeft className="w-4 h-4" /> {t('Transfer Product')}
+            </button>
+          )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={onAddProduct}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition"
+            >
+              <Plus className="w-4 h-4" /> {t('Add Product')}
+            </button>
+          )}
+        </div>
       </div>
 
       {message && (
@@ -385,6 +406,16 @@ export function ProductsScreen({
                                 title={t('Order from Supplier')}
                               >
                                 <Truck className="w-3 h-3" /> {t('Order')}
+                              </button>
+                            )}
+                            {canTransfer && onTransferProduct && p.status === 'active' && avail > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => onTransferProduct(p)}
+                                className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700"
+                                title={t('Transfer Product to Another Shop')}
+                              >
+                                <ArrowRightLeft className="w-3.5 h-3.5" />
                               </button>
                             )}
                             <button
@@ -2320,7 +2351,13 @@ export function ApproveOrdersScreen({
 // ============================================================================
 // SCREEN 11 & 12: INVENTORY MONITORING & STOCK ADJUSTMENTS
 // ============================================================================
-export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, onOpenApproveOrders }) {
+export function InventoryScreen({
+  user,
+  onOpenAdjustment,
+  onOrderFromSupplier,
+  onOpenApproveOrders,
+  onOpenTransfer,
+}) {
   const { t } = useLanguage();
   const isAdmin = (user?.role_slugs || []).includes('owner');
   const [inventory, setInventory] = useState([]);
@@ -2329,6 +2366,7 @@ export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, o
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [tab, setTab] = useState('levels');
   const canOrder = hasPermission(user, 'purchases.manage');
+  const canTransfer = hasPermission(user, 'inventory.adjust');
 
   const loadInventory = async () => {
     const res = await apiRequest('/inventory');
@@ -2387,6 +2425,15 @@ export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, o
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 {t('Approve Orders')} ({pendingOrdersCount})
+              </button>
+            )}
+            {canTransfer && onOpenTransfer && (
+              <button
+                type="button"
+                onClick={() => onOpenTransfer(null)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" /> {t('Transfer Product')}
               </button>
             )}
             {hasPermission(user, 'inventory.adjust') && (
@@ -2459,7 +2506,9 @@ export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, o
                     </>
                   )}
                   <th className="py-3 px-4 text-center font-bold">{t('Status')}</th>
-                  {canOrder && <th className="py-3 px-4 text-center font-bold">{t('Reorder')}</th>}
+                  {(canOrder || canTransfer) && (
+                    <th className="py-3 px-4 text-center font-bold">{t('Actions')}</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -2516,19 +2565,33 @@ export function InventoryScreen({ user, onOpenAdjustment, onOrderFromSupplier, o
                         {t(item.stock_status)}
                       </span>
                     </td>
-                    {canOrder && (
+                    {(canOrder || canTransfer) && (
                       <td className="py-3 px-4 text-center">
-                        {item.stock_status !== 'in_stock' && onOrderFromSupplier ? (
-                          <button
-                            type="button"
-                            onClick={() => onOrderFromSupplier(item)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold shadow-sm transition"
-                          >
-                            <Truck className="w-3 h-3" /> {t('Order from Supplier')}
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
+                        <div className="inline-flex flex-wrap items-center justify-center gap-1.5">
+                          {canTransfer && onOpenTransfer && Number(item.available_quantity || 0) > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenTransfer(item)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold transition"
+                              title={t('Transfer Product to Another Shop')}
+                            >
+                              <ArrowRightLeft className="w-3 h-3" /> {t('Transfer')}
+                            </button>
+                          )}
+                          {canOrder && item.stock_status !== 'in_stock' && onOrderFromSupplier && (
+                            <button
+                              type="button"
+                              onClick={() => onOrderFromSupplier(item)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold shadow-sm transition"
+                            >
+                              <Truck className="w-3 h-3" /> {t('Order from Supplier')}
+                            </button>
+                          )}
+                          {!(canTransfer && onOpenTransfer && Number(item.available_quantity || 0) > 0) &&
+                            !(canOrder && item.stock_status !== 'in_stock' && onOrderFromSupplier) && (
+                              <span className="text-slate-300">—</span>
+                            )}
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -2787,6 +2850,1091 @@ export function StockAdjustmentsScreen({ user, onSaved, onCancel }) {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// ============================================================================
+// SCREEN 12B: INTER-SHOP PRODUCT TRANSFERS (TRANSFER TO ANOTHER SHOP / BRANCH)
+// ============================================================================
+const TRANSFER_REASONS = [
+  'Branch Restock',
+  'Stock Balancing',
+  'Customer Order Transfer',
+  'Showroom / Display Transfer',
+  'Emergency Shop Request',
+  'Other',
+];
+
+function normalizeTransferWhatsAppPhone(phone) {
+  if (!phone) return '';
+  const digits = String(phone).replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('0') && digits.length >= 9) {
+    return `255${digits.slice(1)}`;
+  }
+  return digits;
+}
+
+function buildTransferSlipText(tr, t) {
+  const items = tr.items || [];
+  const lines = [
+    `${tr.from_shop || 'KAMPANGO PHONES AND ELECTRONICS'}`,
+    t('STOCK TRANSFER DELIVERY NOTE'),
+    `${t('Transfer #')}: ${tr.transfer_number}`,
+    `${t('Transfer Date')}: ${formatDate(tr.transfer_date)}`,
+    `${t('Status')}: ${t(tr.status)}`,
+    '----------------------------------------',
+    `${t('From Shop')}: ${tr.from_shop || 'KAMPANGO PHONES AND ELECTRONICS'}`,
+    `${t('Destination Shop')}: ${tr.destination_shop_name}`,
+  ];
+  if (tr.destination_location) {
+    lines.push(`${t('Destination Location')}: ${tr.destination_location}`);
+  }
+  lines.push(`${t('Receiver Name')}: ${tr.receiver_name}`);
+  if (tr.receiver_phone) {
+    lines.push(`${t('Receiver Phone')}: ${tr.receiver_phone}`);
+  }
+  lines.push(`${t('Transfer Reason')}: ${t(tr.transfer_reason)}`);
+  if (tr.carrier_name) {
+    lines.push(
+      `${t('Carrier / Driver')}: ${tr.carrier_name}${tr.carrier_phone ? ` (${tr.carrier_phone})` : ''}`
+    );
+  }
+  if (tr.vehicle_or_waybill) {
+    lines.push(`${t('Vehicle / Waybill #')}: ${tr.vehicle_or_waybill}`);
+  }
+  lines.push('----------------------------------------', t('Transferred Products'));
+  items.forEach((it, idx) => {
+    const qtyStr = formatQtyWithUnit(it.quantity, it.unit_snapshot);
+    const imeiStr = it.serial_or_imei ? ` | IMEI/SN: ${it.serial_or_imei}` : '';
+    lines.push(
+      `${idx + 1}. ${it.product_name_snapshot} (${it.sku_snapshot}) — ${qtyStr}${imeiStr} | ${formatTZS(it.line_retail_total)}`
+    );
+  });
+  lines.push(
+    '----------------------------------------',
+    `${t('Total Units')}: ${formatQtyNumber(tr.total_quantity)}`,
+    `${t('Total Cost Value')}: ${formatTZS(tr.total_cost_value)}`,
+    `${t('Total Retail Value')}: ${formatTZS(tr.total_retail_value)}`
+  );
+  if (tr.notes) {
+    lines.push(`${t('Notes')}: ${tr.notes}`);
+  }
+  if (tr.transferred_by_name) {
+    lines.push(`${t('Dispatched By')}: ${tr.transferred_by_name}`);
+  }
+  return lines.join('\n');
+}
+
+function printTransferDeliveryNote(tr, t) {
+  const items = tr.items || [];
+  const itemRowsHtml = items
+    .map(
+      (it, idx) => `
+      <tr>
+        <td>${idx + 1}</td>
+        <td><strong>${it.product_name_snapshot}</strong><br/><span style="font-size:11px;color:#64748b;">SKU: ${it.sku_snapshot}${it.serial_or_imei ? ` · IMEI/SN: ${it.serial_or_imei}` : ''}</span></td>
+        <td class="text-right"><strong>${formatQtyWithUnit(it.quantity, it.unit_snapshot)}</strong></td>
+        <td class="text-right">${formatUnitPrice(it.unit_cost, it.unit_snapshot)}</td>
+        <td class="text-right">${formatTZS(it.line_cost_total)}</td>
+        <td class="text-right"><strong>${formatTZS(it.line_retail_total)}</strong></td>
+      </tr>
+    `
+    )
+    .join('');
+
+  printHtmlDocument(
+    `${t('STOCK TRANSFER DELIVERY NOTE')} — ${tr.transfer_number}`,
+    `
+      <div class="header">
+        <h2>${t('STOCK TRANSFER DELIVERY NOTE')}</h2>
+        <p><strong>${tr.transfer_number}</strong> · ${t('Transfer Date')}: ${formatDate(tr.transfer_date)} · <span class="badge">${t(tr.status).toUpperCase()}</span></p>
+      </div>
+      <table>
+        <tr>
+          <th style="width:24%;">${t('From Shop')}</th>
+          <td><strong>${tr.from_shop || 'KAMPANGO PHONES AND ELECTRONICS'}</strong></td>
+          <th style="width:24%;">${t('Destination Shop')}</th>
+          <td><strong>${tr.destination_shop_name}</strong>${tr.destination_location ? `<br/><span style="font-size:11px;color:#475569;">${tr.destination_location}</span>` : ''}</td>
+        </tr>
+        <tr>
+          <th>${t('Dispatched By')}</th>
+          <td>${tr.transferred_by_name || '—'}</td>
+          <th>${t('Receiver Name')}</th>
+          <td>${tr.receiver_name}${tr.receiver_phone ? ` (${tr.receiver_phone})` : ''}</td>
+        </tr>
+        <tr>
+          <th>${t('Transfer Reason')}</th>
+          <td>${t(tr.transfer_reason)}</td>
+          <th>${t('Carrier / Driver')}</th>
+          <td>${tr.carrier_name || '—'}${tr.carrier_phone ? ` (${tr.carrier_phone})` : ''}${tr.vehicle_or_waybill ? `<br/><span style="font-size:11px;color:#475569;">${tr.vehicle_or_waybill}</span>` : ''}</td>
+        </tr>
+      </table>
+
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>${t('Product')}</th>
+            <th class="text-right">${t('Quantity')}</th>
+            <th class="text-right">${t('Unit Cost')}</th>
+            <th class="text-right">${t('Cost Total')}</th>
+            <th class="text-right">${t('Retail Value')}</th>
+          </tr>
+        </thead>
+        <tbody>${itemRowsHtml}</tbody>
+      </table>
+
+      <div class="totals">
+        <table>
+          <tr><th>${t('Total Items / Units')}</th><td class="text-right"><strong>${tr.total_items} (${formatQtyNumber(tr.total_quantity)})</strong></td></tr>
+          <tr><th>${t('Total Cost Value')}</th><td class="text-right"><strong>${formatTZS(tr.total_cost_value)}</strong></td></tr>
+          <tr><th>${t('Total Retail Value')}</th><td class="text-right"><strong>${formatTZS(tr.total_retail_value)}</strong></td></tr>
+        </table>
+      </div>
+      ${tr.notes ? `<p style="margin-top:10px;"><strong>${t('Notes')}:</strong> ${tr.notes}</p>` : ''}
+
+      <table style="margin-top:28px;">
+        <tr>
+          <td style="width:33%;border:none;padding-top:24px;">_______________________<br/><strong>${t('Dispatched By')}</strong></td>
+          <td style="width:33%;border:none;padding-top:24px;">_______________________<br/><strong>${t('Carrier / Driver')}</strong></td>
+          <td style="width:33%;border:none;padding-top:24px;">_______________________<br/><strong>${t('Received By')}</strong></td>
+        </tr>
+      </table>
+      <div class="footer">${t('Verified Inter-Shop Stock Transfer Document')} — ${tr.from_shop || 'KAMPANGO PHONES AND ELECTRONICS'}</div>
+    `
+  );
+}
+
+export function StockTransfersScreen({
+  user,
+  settings,
+  prefillProduct = null,
+  onClearPrefill,
+  onBackToInventory,
+}) {
+  const { t } = useLanguage();
+  const canTransfer = hasPermission(user, 'inventory.adjust');
+
+  const [products, setProducts] = useState([]);
+  const [transfers, setTransfers] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [showForm, setShowForm] = useState(Boolean(prefillProduct));
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [completedTransfer, setCompletedTransfer] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+
+  const [form, setForm] = useState({
+    destination_shop_name: '',
+    destination_location: '',
+    receiver_name: '',
+    receiver_phone: '',
+    transfer_date: new Date().toISOString().slice(0, 10),
+    transfer_reason: TRANSFER_REASONS[0],
+    status: 'in_transit',
+    carrier_name: '',
+    carrier_phone: '',
+    vehicle_or_waybill: '',
+    notes: '',
+  });
+
+  const [lines, setLines] = useState([
+    { product_id: prefillProduct ? String(prefillProduct.id) : '', quantity: '1', serial_or_imei: '' },
+  ]);
+
+  const loadData = async () => {
+    if (!canTransfer) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const [prodRes, trRes] = await Promise.all([
+        apiRequest('/products?status=active'),
+        apiRequest('/stock-transfers'),
+      ]);
+      const prodList = (prodRes.products || []).filter((p) => Number(p.available_quantity || 0) > 0);
+      setProducts(prodList);
+      setTransfers(trRes.transfers || []);
+      setSummary(trRes.summary || {});
+
+      setLines((prev) =>
+        prev.map((row, i) => {
+          if (i === 0 && prefillProduct) {
+            return { ...row, product_id: String(prefillProduct.id) };
+          }
+          if (!row.product_id && prodList.length > 0) {
+            return { ...row, product_id: String(prodList[0].id) };
+          }
+          return row;
+        })
+      );
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [canTransfer]);
+
+  useEffect(() => {
+    if (prefillProduct) {
+      setShowForm(true);
+      setLines([{ product_id: String(prefillProduct.id), quantity: '1', serial_or_imei: '' }]);
+    }
+  }, [prefillProduct]);
+
+  const filteredTransfers =
+    statusFilter === 'all' ? transfers : transfers.filter((tr) => tr.status === statusFilter);
+  const transfersPg = usePagination(filteredTransfers, 5, statusFilter);
+
+  if (!canTransfer) {
+    return (
+      <div className="max-w-md mx-auto p-8 bg-white rounded-2xl border border-red-200 text-center space-y-4 my-8 shadow-sm">
+        <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 mx-auto flex items-center justify-center">
+          <AlertTriangle className="w-6 h-6" />
+        </div>
+        <h2 className="text-base font-extrabold text-slate-900">{t('Access Restricted: Admin Only')}</h2>
+        <p className="text-xs text-slate-600">
+          {t('Transferring products to another shop can only be performed by the Shop Administrator.')}
+        </p>
+        {onBackToInventory && (
+          <button
+            type="button"
+            onClick={onBackToInventory}
+            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm"
+          >
+            {t('Return to Inventory')}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const productById = (id) => products.find((p) => String(p.id) === String(id));
+
+  const addLine = () => {
+    const firstAvail = products.find((p) => !lines.some((l) => String(l.product_id) === String(p.id))) || products[0];
+    setLines((prev) => [
+      ...prev,
+      { product_id: firstAvail ? String(firstAvail.id) : '', quantity: '1', serial_or_imei: '' },
+    ]);
+  };
+
+  const updateLine = (idx, field, value) => {
+    setLines((prev) => prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
+  };
+
+  const removeLine = (idx) => {
+    setLines((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
+  };
+
+  const totals = lines.reduce(
+    (acc, line) => {
+      const p = productById(line.product_id);
+      const q = Math.max(0, Number(line.quantity || 0));
+      if (!p || q <= 0) return acc;
+      const unitCost = Number(p.weighted_avg_cost || p.purchase_price || 0);
+      const unitSell = Number(p.selling_price || 0);
+      return {
+        qty: acc.qty + q,
+        cost: acc.cost + q * unitCost,
+        retail: acc.retail + q * unitSell,
+      };
+    },
+    { qty: 0, cost: 0, retail: 0 }
+  );
+
+  const handleSubmitTransfer = async (e) => {
+    e.preventDefault();
+    setMessage(null);
+
+    const payloadItems = lines
+      .filter((l) => l.product_id && Number(l.quantity) > 0)
+      .map((l) => ({
+        product_id: Number(l.product_id),
+        quantity: Number(l.quantity),
+        serial_or_imei: l.serial_or_imei.trim(),
+      }));
+
+    if (payloadItems.length === 0) {
+      setMessage({ type: 'error', text: 'At least one product item is required to complete a transfer.' });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await apiRequest('/stock-transfers', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...form,
+          items: payloadItems,
+        }),
+      });
+      setMessage({ type: 'success', text: res.message });
+      if (res.transfer) {
+        setCompletedTransfer(res.transfer);
+      }
+      setShowForm(false);
+      onClearPrefill?.();
+      setForm({
+        destination_shop_name: '',
+        destination_location: '',
+        receiver_name: '',
+        receiver_phone: '',
+        transfer_date: new Date().toISOString().slice(0, 10),
+        transfer_reason: TRANSFER_REASONS[0],
+        status: 'in_transit',
+        carrier_name: '',
+        carrier_phone: '',
+        vehicle_or_waybill: '',
+        notes: '',
+      });
+      setLines([{ product_id: products[0] ? String(products[0].id) : '', quantity: '1', serial_or_imei: '' }]);
+      await loadData();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleMarkReceived = async (tr) => {
+    try {
+      const res = await apiRequest(`/stock-transfers/${tr.id}/receive`, { method: 'POST' });
+      setMessage({ type: 'success', text: res.message });
+      loadData();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleCancelTransfer = async (tr) => {
+    if (
+      !window.confirm(
+        t('Cancel transfer {ref} and return all transferred items back into your shop stock?', {
+          ref: tr.transfer_number,
+        })
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await apiRequest(`/stock-transfers/${tr.id}/cancel`, { method: 'POST' });
+      setMessage({ type: 'success', text: res.message });
+      loadData();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleWhatsAppTransfer = (tr) => {
+    const text = buildTransferSlipText(tr, t);
+    const phone = normalizeTransferWhatsAppPhone(tr.receiver_phone);
+    const url = phone
+      ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareTransfer = async (tr) => {
+    const text = buildTransferSlipText(tr, t);
+    const title = `${t('STOCK TRANSFER DELIVERY NOTE')} — ${tr.transfer_number}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title, text });
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(tr.id);
+      setTimeout(() => setCopiedId(null), 2500);
+    } catch {
+      // ignore clipboard fallback
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-extrabold text-slate-900">
+            {t('Transfer Products to Another Shop')}
+          </h1>
+          <p className="text-xs text-slate-500">
+            {t('Dispatch products from {shop} to another shop/branch with receiver, carrier, IMEI/serial & printable delivery note', {
+              shop: settings?.shop_name || 'KAMPANGO PHONES AND ELECTRONICS',
+            })}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {onBackToInventory && (
+            <button
+              type="button"
+              onClick={onBackToInventory}
+              className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700"
+            >
+              {t('Back to Inventory')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition"
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            {showForm ? t('Close Transfer Form') : t('+ New Product Transfer')}
+          </button>
+        </div>
+      </div>
+
+      {message && (
+        <div
+          className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center justify-between gap-3 ${
+            message.type === 'error'
+              ? 'bg-red-50 border-red-200 text-red-700'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          }`}
+        >
+          <span>{t(message.text)}</span>
+          <button type="button" onClick={() => setMessage(null)} className="underline text-[11px] shrink-0">
+            {t('Dismiss')}
+          </button>
+        </div>
+      )}
+
+      {/* Completed Transfer Quick Slip Modal */}
+      {completedTransfer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    {t('Transfer Recorded: {ref}', { ref: completedTransfer.transfer_number })}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    → {completedTransfer.destination_shop_name} ({completedTransfer.receiver_name})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label={t('Close')}
+                onClick={() => setCompletedTransfer(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-slate-500">{t('Total Items / Units')}:</span>
+                <span className="font-extrabold text-slate-900">
+                  {completedTransfer.total_items} ({formatQtyNumber(completedTransfer.total_quantity)})
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">{t('Total Cost Value')}:</span>
+                <span className="font-bold text-slate-900">{formatTZS(completedTransfer.total_cost_value)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">{t('Total Retail Value')}:</span>
+                <span className="font-extrabold text-blue-600">{formatTZS(completedTransfer.total_retail_value)}</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => printTransferDeliveryNote(completedTransfer, t)}
+                className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
+              >
+                <Printer className="w-3.5 h-3.5" /> {t('Print Note')}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleWhatsAppTransfer(completedTransfer)}
+                className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold"
+              >
+                <MessageCircle className="w-3.5 h-3.5" /> {t('WhatsApp')}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleShareTransfer(completedTransfer)}
+                className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold"
+              >
+                {copiedId === completedTransfer.id ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" /> {t('Copied!')}
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-3.5 h-3.5" /> {t('Share')}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Summary KPI Row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <p className="text-xs text-slate-500">{t('Total Transfers')}</p>
+          <p className="text-xl font-extrabold text-slate-900 mt-1">{summary.total_transfers || 0}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <p className="text-xs text-slate-500">{t('In Transit')}</p>
+          <p className="text-xl font-extrabold text-amber-600 mt-1">{summary.in_transit_count || 0}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <p className="text-xs text-slate-500">{t('Total Cost Transferred')}</p>
+          <p className="text-lg font-extrabold text-slate-900 mt-1">
+            {formatTZS(summary.total_cost_transferred)}
+          </p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <p className="text-xs text-slate-500">{t('Total Retail Value Transferred')}</p>
+          <p className="text-lg font-extrabold text-blue-600 mt-1">
+            {formatTZS(summary.total_retail_transferred)}
+          </p>
+        </div>
+      </div>
+
+      {/* New Transfer Form */}
+      {showForm && (
+        <form
+          onSubmit={handleSubmitTransfer}
+          className="bg-white rounded-2xl border border-indigo-200 p-6 shadow-sm space-y-6"
+        >
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                <ArrowRightLeft className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-extrabold text-slate-900">
+                  {t('New Inter-Shop Stock Transfer')}
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  {t('From: {shop} — Stock is deducted automatically upon confirmation', {
+                    shop: settings?.shop_name || 'KAMPANGO PHONES AND ELECTRONICS',
+                  })}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 1: Destination Shop & Receiver */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-extrabold uppercase tracking-wide text-indigo-700">
+              {t('1. Destination Shop & Receiver Information')}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label htmlFor="tr-dest-shop" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Destination Shop / Branch Name')} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="tr-dest-shop"
+                  type="text"
+                  required
+                  value={form.destination_shop_name}
+                  onChange={(e) => setForm({ ...form, destination_shop_name: e.target.value })}
+                  placeholder={t('e.g. Kampango Branch 2 — Kariakoo')}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+              <div>
+                <label htmlFor="tr-dest-loc" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Destination Location / Address')}
+                </label>
+                <input
+                  id="tr-dest-loc"
+                  type="text"
+                  value={form.destination_location}
+                  onChange={(e) => setForm({ ...form, destination_location: e.target.value })}
+                  placeholder={t('e.g. Aggrey Street / Mwanza / Arusha')}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+              <div>
+                <label htmlFor="tr-receiver" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Receiver Name')} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="tr-receiver"
+                  type="text"
+                  required
+                  value={form.receiver_name}
+                  onChange={(e) => setForm({ ...form, receiver_name: e.target.value })}
+                  placeholder={t('Person receiving the goods')}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+              <div>
+                <label htmlFor="tr-rec-phone" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Receiver Phone')}
+                </label>
+                <input
+                  id="tr-rec-phone"
+                  type="tel"
+                  value={form.receiver_phone}
+                  onChange={(e) => setForm({ ...form, receiver_phone: e.target.value })}
+                  placeholder="+255 7..."
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Dispatch & Transport Details */}
+          <div className="space-y-3 pt-4 border-t border-slate-100">
+            <h3 className="text-xs font-extrabold uppercase tracking-wide text-indigo-700">
+              {t('2. Dispatch, Reason & Transport Details')}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label htmlFor="tr-date" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Transfer Date')} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="tr-date"
+                  type="date"
+                  required
+                  value={form.transfer_date}
+                  onChange={(e) => setForm({ ...form, transfer_date: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+              <div>
+                <label htmlFor="tr-reason" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Transfer Reason')}
+                </label>
+                <select
+                  id="tr-reason"
+                  value={form.transfer_reason}
+                  onChange={(e) => setForm({ ...form, transfer_reason: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white"
+                >
+                  {TRANSFER_REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {t(r)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="tr-status" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Delivery Status')}
+                </label>
+                <select
+                  id="tr-status"
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white"
+                >
+                  <option value="in_transit">{t('In Transit (Confirm Upon Arrival)')}</option>
+                  <option value="received">{t('Delivered / Received Immediately')}</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="tr-carrier" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Carrier / Driver / Staff Name')}
+                </label>
+                <input
+                  id="tr-carrier"
+                  type="text"
+                  value={form.carrier_name}
+                  onChange={(e) => setForm({ ...form, carrier_name: e.target.value })}
+                  placeholder={t('e.g. Bodaboda / Bus Courier / Staff name')}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+              <div>
+                <label htmlFor="tr-carrier-phone" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Carrier Phone')}
+                </label>
+                <input
+                  id="tr-carrier-phone"
+                  type="tel"
+                  value={form.carrier_phone}
+                  onChange={(e) => setForm({ ...form, carrier_phone: e.target.value })}
+                  placeholder="+255 7..."
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+              <div>
+                <label htmlFor="tr-waybill" className="block text-xs font-bold text-slate-700 mb-1">
+                  {t('Vehicle / Bus / Waybill #')}
+                </label>
+                <input
+                  id="tr-waybill"
+                  type="text"
+                  value={form.vehicle_or_waybill}
+                  onChange={(e) => setForm({ ...form, vehicle_or_waybill: e.target.value })}
+                  placeholder={t('e.g. T 123 ABC / Waybill #442')}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Transferred Products (Multi-Item) */}
+          <div className="space-y-3 pt-4 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-wide text-indigo-700">
+                {t('3. Products to Transfer')}
+              </h3>
+              <button
+                type="button"
+                onClick={addLine}
+                disabled={products.length === 0}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold"
+              >
+                <Plus className="w-3.5 h-3.5" /> {t('Add Another Product')}
+              </button>
+            </div>
+
+            {products.length === 0 ? (
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
+                {t('No in-stock products available to transfer right now.')}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {lines.map((line, idx) => {
+                  const selected = productById(line.product_id);
+                  const meter = isMeterUnit(selected?.unit);
+                  const maxQty = Number(selected?.available_quantity || 0);
+                  const lineRetail =
+                    Number(line.quantity || 0) * Number(selected?.selling_price || 0);
+                  return (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end p-3 rounded-xl bg-slate-50 border border-slate-200"
+                    >
+                      <div className="md:col-span-5">
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          {t('Product')} <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          required
+                          value={line.product_id}
+                          onChange={(e) => updateLine(idx, 'product_id', e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white"
+                        >
+                          <option value="">{t('-- Select Product --')}</option>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({p.sku}) — {t('Stock')}: {formatQtyWithUnit(p.available_quantity, p.unit)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          {meter ? t('Quantity (Meters)') : t('Quantity')} <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={meter ? '0.01' : '1'}
+                          step={meter ? '0.01' : '1'}
+                          max={maxQty > 0 ? maxQty : undefined}
+                          value={line.quantity}
+                          onChange={(e) => updateLine(idx, 'quantity', e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
+                        />
+                      </div>
+                      <div className="md:col-span-3">
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          {t('Serial / IMEI (Optional)')}
+                        </label>
+                        <input
+                          type="text"
+                          value={line.serial_or_imei}
+                          onChange={(e) => updateLine(idx, 'serial_or_imei', e.target.value)}
+                          placeholder={t('e.g. IMEI / S/N')}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono"
+                        />
+                      </div>
+                      <div className="md:col-span-2 flex items-center justify-between gap-2 pb-1">
+                        <div className="text-right flex-1">
+                          <p className="text-[10px] text-slate-400">{t('Retail Value')}</p>
+                          <p className="text-xs font-extrabold text-blue-700">{formatTZS(lineRetail)}</p>
+                        </div>
+                        {lines.length > 1 && (
+                          <button
+                            type="button"
+                            aria-label={t('Remove row')}
+                            onClick={() => removeLine(idx)}
+                            className="p-2 rounded-lg text-red-500 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Live Transfer Totals */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-xl bg-indigo-50 border border-indigo-200 text-xs">
+              <div>
+                <p className="text-indigo-700 font-semibold">{t('Total Units to Transfer')}</p>
+                <p className="text-base font-extrabold text-indigo-950">{formatQtyNumber(totals.qty)}</p>
+              </div>
+              <div>
+                <p className="text-indigo-700 font-semibold">{t('Total Cost Value')}</p>
+                <p className="text-base font-extrabold text-indigo-950">{formatTZS(totals.cost)}</p>
+              </div>
+              <div>
+                <p className="text-indigo-700 font-semibold">{t('Total Retail Value')}</p>
+                <p className="text-base font-extrabold text-blue-700">{formatTZS(totals.retail)}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label htmlFor="tr-notes" className="block text-xs font-bold text-slate-700 mb-1">
+              {t('Additional Transfer Notes (Optional)')}
+            </label>
+            <textarea
+              id="tr-notes"
+              rows={2}
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              placeholder={t('e.g. Includes sealed boxes, warranty cards, charger cables...')}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={saving || products.length === 0}
+              className="inline-flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-extrabold shadow-sm"
+            >
+              <ArrowRightLeft className="w-4 h-4" />
+              {saving ? t('Transferring...') : t('Confirm & Transfer Products')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                onClearPrefill?.();
+              }}
+              className="px-5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            >
+              {t('Cancel')}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Transfer Status Filter Tabs */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200">
+        {[
+          { id: 'all', label: 'All Transfers', count: transfers.length },
+          {
+            id: 'in_transit',
+            label: 'In Transit',
+            count: transfers.filter((x) => x.status === 'in_transit').length,
+          },
+          {
+            id: 'received',
+            label: 'Received',
+            count: transfers.filter((x) => x.status === 'received').length,
+          },
+          {
+            id: 'cancelled',
+            label: 'Cancelled',
+            count: transfers.filter((x) => x.status === 'cancelled').length,
+          },
+        ].map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setStatusFilter(f.id)}
+            className={`px-4 py-2.5 text-xs font-bold border-b-2 ${
+              statusFilter === f.id
+                ? 'border-indigo-600 text-indigo-700'
+                : 'border-transparent text-slate-500'
+            }`}
+          >
+            {t(f.label)} ({f.count})
+          </button>
+        ))}
+      </div>
+
+      {/* Transfer History Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="table-region" role="region" aria-label={t('Stock transfers history')}>
+          <table className="text-xs">
+            <thead>
+              <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                <th className="py-3 px-4 text-left font-bold">{t('Transfer # & Date')}</th>
+                <th className="py-3 px-4 text-left font-bold">{t('Destination Shop & Receiver')}</th>
+                <th className="py-3 px-4 text-left font-bold">{t('Products Transferred')}</th>
+                <th className="py-3 px-4 text-left font-bold">{t('Carrier & Reason')}</th>
+                <th className="py-3 px-4 text-right font-bold">{t('Total Value')}</th>
+                <th className="py-3 px-4 text-center font-bold">{t('Status')}</th>
+                <th className="py-3 px-4 text-center font-bold">{t('Actions')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="py-10 text-center text-slate-400">
+                    {t('Loading transfers...')}
+                  </td>
+                </tr>
+              ) : transfersPg.pageItems.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-10 text-center text-slate-400">
+                    {t('No inter-shop product transfers recorded yet.')}
+                  </td>
+                </tr>
+              ) : (
+                transfersPg.pageItems.map((tr) => (
+                  <tr key={tr.id} className="hover:bg-slate-50">
+                    <td className="py-3 px-4">
+                      <p className="font-extrabold text-indigo-700">{tr.transfer_number}</p>
+                      <p className="text-[11px] text-slate-500">{formatDate(tr.transfer_date)}</p>
+                    </td>
+                    <td className="py-3 px-4">
+                      <p className="font-bold text-slate-900">{tr.destination_shop_name}</p>
+                      {tr.destination_location && (
+                        <p className="text-[11px] text-slate-500">{tr.destination_location}</p>
+                      )}
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        {t('Receiver')}: <strong>{tr.receiver_name}</strong>
+                        {tr.receiver_phone ? ` · ${tr.receiver_phone}` : ''}
+                      </p>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="space-y-0.5">
+                        {(tr.items || []).map((it) => (
+                          <p key={it.id} className="text-[11px] text-slate-700">
+                            <span className="font-bold text-slate-900">{it.product_name_snapshot}</span>{' '}
+                            <span className="text-indigo-700 font-extrabold">
+                              × {formatQtyWithUnit(it.quantity, it.unit_snapshot)}
+                            </span>
+                            {it.serial_or_imei ? (
+                              <span className="text-slate-400"> ({it.serial_or_imei})</span>
+                            ) : null}
+                          </p>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <p className="font-semibold text-slate-800">{t(tr.transfer_reason)}</p>
+                      {tr.carrier_name && (
+                        <p className="text-[11px] text-slate-500">
+                          {tr.carrier_name}
+                          {tr.carrier_phone ? ` · ${tr.carrier_phone}` : ''}
+                        </p>
+                      )}
+                      {tr.vehicle_or_waybill && (
+                        <p className="text-[10px] text-slate-400">{tr.vehicle_or_waybill}</p>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <p className="font-extrabold text-slate-900">{formatTZS(tr.total_retail_value)}</p>
+                      <p className="text-[10px] text-slate-500">
+                        {t('Cost')}: {formatTZS(tr.total_cost_value)}
+                      </p>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase ${
+                          tr.status === 'received'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : tr.status === 'cancelled'
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {t(tr.status)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <div className="flex flex-wrap items-center justify-center gap-1.5">
+                        {tr.status === 'in_transit' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleMarkReceived(tr)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold"
+                              title={t('Mark as Received')}
+                            >
+                              <CheckCircle2 className="w-3 h-3" /> {t('Received')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCancelTransfer(tr)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-bold"
+                              title={t('Cancel & Restock')}
+                            >
+                              <XCircle className="w-3 h-3" /> {t('Cancel')}
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => printTransferDeliveryNote(tr, t)}
+                          className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+                          title={t('Print Note')}
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleWhatsAppTransfer(tr)}
+                          className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700"
+                          title={t('WhatsApp')}
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleShareTransfer(tr)}
+                          className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700"
+                          title={t('Share / Copy')}
+                        >
+                          {copiedId === tr.id ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <Pagination {...transfersPg.paginationProps} />
+      </div>
     </div>
   );
 }

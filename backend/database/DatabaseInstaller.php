@@ -7,7 +7,7 @@ use PDOException;
 
 class DatabaseInstaller
 {
-    private const SCHEMA_VERSION = '2026.11.20.render-tidb-v2';
+    private const SCHEMA_VERSION = '2026.11.24.stock-transfers-v1';
     private static ?array $cachedConfig = null;
     private static bool $dbJustCreated = false;
 
@@ -381,6 +381,79 @@ class DatabaseInstaller
 
             // Sync real KAMPANGO PHONES AND ELECTRONICS shop categories & products and remove computer/laptop category
             ShopCatalogSeeder::syncCatalog($pdo);
+
+            // Ensure inter-shop stock transfer tables and stock_movements transfer ENUM values exist
+            $smTypeCol = $pdo->query("SHOW COLUMNS FROM `stock_movements` LIKE 'movement_type'")->fetch();
+            if ($smTypeCol && !str_contains(strtolower((string) ($smTypeCol['Type'] ?? '')), "'transfer_out'")) {
+                $pdo->exec("
+                    ALTER TABLE `stock_movements`
+                    MODIFY COLUMN `movement_type` ENUM(
+                        'purchase_receipt',
+                        'sale',
+                        'return_resalable',
+                        'adjustment_increase',
+                        'adjustment_decrease',
+                        'damaged',
+                        'missing',
+                        'lost',
+                        'physical_count',
+                        'initial_stock',
+                        'transfer_out',
+                        'transfer_cancel_return'
+                    ) NOT NULL
+                ");
+            }
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS `stock_transfers` (
+                  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                  `transfer_number` VARCHAR(50) NOT NULL UNIQUE,
+                  `transfer_date` DATE NOT NULL,
+                  `from_shop` VARCHAR(160) NOT NULL DEFAULT 'KAMPANGO PHONES AND ELECTRONICS',
+                  `destination_shop_name` VARCHAR(160) NOT NULL,
+                  `destination_location` VARCHAR(255) NULL,
+                  `receiver_name` VARCHAR(150) NOT NULL,
+                  `receiver_phone` VARCHAR(50) NULL,
+                  `carrier_name` VARCHAR(150) NULL,
+                  `carrier_phone` VARCHAR(50) NULL,
+                  `vehicle_or_waybill` VARCHAR(120) NULL,
+                  `transfer_reason` VARCHAR(180) NOT NULL DEFAULT 'Branch Restock',
+                  `status` ENUM('in_transit', 'received', 'cancelled') NOT NULL DEFAULT 'in_transit',
+                  `total_items` INT NOT NULL DEFAULT 0,
+                  `total_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                  `total_cost_value` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                  `total_retail_value` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                  `notes` TEXT NULL,
+                  `transferred_by` BIGINT UNSIGNED NOT NULL,
+                  `received_confirmed_by` BIGINT UNSIGNED NULL,
+                  `received_at` TIMESTAMP NULL,
+                  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  INDEX `idx_st_date` (`transfer_date`),
+                  INDEX `idx_st_status` (`status`),
+                  CONSTRAINT `fk_st_user` FOREIGN KEY (`transferred_by`) REFERENCES `users`(`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS `stock_transfer_items` (
+                  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                  `transfer_id` BIGINT UNSIGNED NOT NULL,
+                  `product_id` BIGINT UNSIGNED NOT NULL,
+                  `product_name_snapshot` VARCHAR(180) NOT NULL,
+                  `sku_snapshot` VARCHAR(80) NOT NULL,
+                  `unit_snapshot` VARCHAR(20) NOT NULL DEFAULT 'piece',
+                  `quantity` DECIMAL(12,2) NOT NULL,
+                  `unit_cost` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                  `unit_selling_price` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                  `line_cost_total` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                  `line_retail_total` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                  `serial_or_imei` VARCHAR(120) NULL,
+                  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  INDEX `idx_sti_transfer` (`transfer_id`),
+                  INDEX `idx_sti_product` (`product_id`),
+                  CONSTRAINT `fk_sti_transfer` FOREIGN KEY (`transfer_id`) REFERENCES `stock_transfers`(`id`) ON DELETE CASCADE,
+                  CONSTRAINT `fk_sti_product` FOREIGN KEY (`product_id`) REFERENCES `products`(`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
 
             // Add performance indexes on high-traffic lookup columns (idempotent)
             $indexes = [

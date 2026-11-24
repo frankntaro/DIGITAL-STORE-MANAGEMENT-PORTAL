@@ -137,12 +137,24 @@ if ($method === 'POST' && preg_match('#^/purchases/(\d+)/cancel$#', $path, $m)) 
     CatalogInventoryController::cancelPurchase($pdo, $user, (int) $m[1]);
 }
 
-// Inventory & Stock Adjustments
+// Inventory & Stock Adjustments & Inter-Shop Transfers
 if ($method === 'GET' && $path === '/inventory') {
     CatalogInventoryController::getInventoryOverview($pdo, $user);
 }
 if ($method === 'POST' && $path === '/stock-adjustments') {
     CatalogInventoryController::createStockAdjustment($pdo, $user);
+}
+if ($method === 'GET' && $path === '/stock-transfers') {
+    CatalogInventoryController::listStockTransfers($pdo, $user);
+}
+if ($method === 'POST' && $path === '/stock-transfers') {
+    CatalogInventoryController::createStockTransfer($pdo, $user);
+}
+if ($method === 'POST' && preg_match('#^/stock-transfers/(\d+)/receive$#', $path, $m)) {
+    CatalogInventoryController::markTransferReceived($pdo, $user, (int) $m[1]);
+}
+if ($method === 'POST' && preg_match('#^/stock-transfers/(\d+)/cancel$#', $path, $m)) {
+    CatalogInventoryController::cancelStockTransfer($pdo, $user, (int) $m[1]);
 }
 
 // POS & Sales

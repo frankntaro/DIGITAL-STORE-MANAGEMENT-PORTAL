@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
+  ArrowRightLeft,
   BarChart3,
   Boxes,
   Building2,
@@ -66,6 +67,9 @@ const InventoryScreen = lazy(() =>
 const StockAdjustmentsScreen = lazy(() =>
   import('./screens/ProductInventoryScreens').then((m) => ({ default: m.StockAdjustmentsScreen }))
 );
+const StockTransfersScreen = lazy(() =>
+  import('./screens/ProductInventoryScreens').then((m) => ({ default: m.StockTransfersScreen }))
+);
 const CustomersScreen = lazy(() =>
   import('./screens/CustomerSupplierScreens').then((m) => ({ default: m.CustomersScreen }))
 );
@@ -124,6 +128,7 @@ const NAV_ITEMS = [
   { id: 'approve_orders', screenNo: 10, label: 'Approve Orders', icon: CheckCircle2, perm: 'purchases.manage' },
   { id: 'inventory', screenNo: 11, label: 'Inventory', icon: Boxes, perm: ['inventory.view', 'products.view'] },
   { id: 'stock_adjustments', screenNo: 12, label: 'Stock Adjustments', icon: SlidersHorizontal, perm: 'inventory.adjust' },
+  { id: 'stock_transfers', screenNo: 26, label: 'Transfer Products', icon: ArrowRightLeft, perm: 'inventory.adjust' },
   { id: 'customers', screenNo: 13, label: 'Customers', icon: Users, perm: ['customers.view', 'pos.sell'] },
   { id: 'debts', screenNo: 15, label: 'Customer Debts', icon: CreditCard, perm: ['debts.view', 'customers.view'] },
   { id: 'debt_repayment', screenNo: 16, label: 'Debt Repayment', icon: Wallet, perm: 'debts.repay' },
@@ -153,6 +158,7 @@ export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [productPurchaseFilter, setProductPurchaseFilter] = useState('all');
   const [orderPrefillProduct, setOrderPrefillProduct] = useState(null);
+  const [transferPrefillProduct, setTransferPrefillProduct] = useState(null);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [selectedCustomerId, setSelectedCustomerId] = useState(1);
   const [selectedDebt, setSelectedDebt] = useState(null);
@@ -413,6 +419,12 @@ export default function App() {
     setActiveScreen('new_purchase');
   };
 
+  const handleTransferProduct = (product) => {
+    if (!hasPermission(user, 'inventory.adjust')) return;
+    setTransferPrefillProduct(product || null);
+    setActiveScreen('stock_transfers');
+  };
+
   const renderScreen = () => {
     switch (activeScreen) {
       case 'dashboard':
@@ -484,6 +496,7 @@ export default function App() {
               setActiveScreen('add_edit_product');
             }}
             onOrderFromSupplier={handleOrderFromSupplier}
+            onTransferProduct={handleTransferProduct}
           />
         );
       case 'add_edit_product':
@@ -568,6 +581,7 @@ export default function App() {
             onOpenAdjustment={() => setActiveScreen('stock_adjustments')}
             onOrderFromSupplier={handleOrderFromSupplier}
             onOpenApproveOrders={() => setActiveScreen('approve_orders')}
+            onOpenTransfer={handleTransferProduct}
           />
         );
       case 'stock_adjustments':
@@ -576,6 +590,19 @@ export default function App() {
             user={user}
             onSaved={() => setActiveScreen('inventory')}
             onCancel={() => setActiveScreen('inventory')}
+          />
+        );
+      case 'stock_transfers':
+        return (
+          <StockTransfersScreen
+            user={user}
+            settings={settings}
+            prefillProduct={transferPrefillProduct}
+            onClearPrefill={() => setTransferPrefillProduct(null)}
+            onBackToInventory={() => {
+              setTransferPrefillProduct(null);
+              setActiveScreen('inventory');
+            }}
           />
         );
       case 'customers':
@@ -856,6 +883,9 @@ export default function App() {
                 <option value="inventory">11. {t('Inventory')}</option>
                 {hasPermission(user, 'inventory.adjust') && (
                   <option value="stock_adjustments">12. {t('Stock Adjustments')}</option>
+                )}
+                {hasPermission(user, 'inventory.adjust') && (
+                  <option value="stock_transfers">26. {t('Transfer Products')}</option>
                 )}
                 <option value="customers">13. {t('Customers')}</option>
                 <option value="customer_profile">14. {t('Customer Profile & Statement')}</option>

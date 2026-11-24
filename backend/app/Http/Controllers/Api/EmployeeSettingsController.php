@@ -583,7 +583,8 @@ class EmployeeSettingsController extends BaseApiController
             'suppliers', 'purchases', 'purchase_items', 'supplier_payments',
             'customers', 'sales', 'sale_items', 'customer_payments',
             'cash_sessions', 'cash_movements', 'expenses',
-            'returns', 'return_items', 'warranties', 'warranty_claims', 'audit_logs', 'sync_records'
+            'returns', 'return_items', 'warranties', 'warranty_claims', 'audit_logs', 'sync_records',
+            'stock_transfers', 'stock_transfer_items'
         ];
 
         $snapshot = [
