@@ -464,9 +464,15 @@ class FinanceAnalyticsController extends BaseApiController
     public static function getReports(PDO $pdo, array $user): never
     {
         $reportType = $_GET['type'] ?? 'overview';
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+
         if ($reportType === 'financial') {
             // SRS 2.2, 2.3 & AT-19: Attempt unauthorized financial access -> Access is denied
             self::requirePermission($user, 'reports.financial');
+        } elseif ($reportType === 'inventory') {
+            if (!$isAdmin) {
+                self::error('Access denied: Inventory & valuation reports are reserved for the Shop Admin.', 403);
+            }
         } else {
             self::requirePermission($user, ['reports.operational', 'reports.financial']);
         }
@@ -483,6 +489,13 @@ class FinanceAnalyticsController extends BaseApiController
             $summary['gross_profit'] = null;
             $summary['net_profit'] = null;
             $summary['operating_expenses'] = null;
+        }
+        if (!$isAdmin) {
+            // Inventory & valuation figures on Reports are strictly Admin-only
+            $summary['inventory_cost_value'] = null;
+            if (array_key_exists('inventory_retail_value', $summary)) {
+                $summary['inventory_retail_value'] = null;
+            }
         }
 
         // Sales by Category
@@ -548,15 +561,29 @@ class FinanceAnalyticsController extends BaseApiController
         ");
         $expensesByCatStmt->execute([$startDate, $endDate]);
 
+        $productRows = $byProductStmt->fetchAll();
+        if (!$isAdmin || !$canSeeFinancials) {
+            foreach ($productRows as &$pRow) {
+                if (!$isAdmin) {
+                    unset($pRow['current_stock']);
+                }
+                if (!$canSeeFinancials) {
+                    unset($pRow['cogs'], $pRow['profit']);
+                }
+            }
+            unset($pRow);
+        }
+
         self::json([
-            'success'               => true,
-            'period'                => ['start_date' => $startDate, 'end_date' => $endDate],
-            'financials_permitted'  => $canSeeFinancials,
-            'summary'               => $summary,
-            'sales_by_category'     => $byCategoryStmt->fetchAll(),
-            'sales_by_product'      => $byProductStmt->fetchAll(),
-            'sales_by_employee'     => $byEmployeeStmt->fetchAll(),
-            'expenses_by_category'  => $canSeeFinancials ? $expensesByCatStmt->fetchAll() : [],
+            'success'                       => true,
+            'period'                        => ['start_date' => $startDate, 'end_date' => $endDate],
+            'financials_permitted'          => $canSeeFinancials,
+            'inventory_valuation_permitted' => $isAdmin,
+            'summary'                       => $summary,
+            'sales_by_category'             => $isAdmin ? $byCategoryStmt->fetchAll() : [],
+            'sales_by_product'              => $productRows,
+            'sales_by_employee'             => $byEmployeeStmt->fetchAll(),
+            'expenses_by_category'          => $canSeeFinancials ? $expensesByCatStmt->fetchAll() : [],
         ]);
     }
 }

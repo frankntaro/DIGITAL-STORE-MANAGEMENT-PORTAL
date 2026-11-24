@@ -992,6 +992,7 @@ function buildShareableReportText({
   byCategory,
   byEmployee,
   financialsPermitted,
+  canSeeInventoryValuation,
   t,
 }) {
   const shopName = settings?.shop_name || 'KAMPANGO PHONES AND ELECTRONICS';
@@ -1009,9 +1010,13 @@ function buildShareableReportText({
     `${t('Net Sales Revenue')}: ${formatTZS(summary.sales_revenue)}`,
     `${t('Total Cash Collected')}: ${formatTZS(summary.cash_collected)}`,
     `${t('Accounts Receivable (AR)')}: ${formatTZS(summary.accounts_receivable)}`,
-    `${t('Inventory Cost Value')}: ${formatTZS(summary.inventory_cost_value)}`,
-    `${t('Accounts Payable (Supplier Balances)')}: ${formatTZS(summary.accounts_payable)}`,
   ];
+
+  if (canSeeInventoryValuation) {
+    lines.push(`${t('Inventory Cost Value')}: ${formatTZS(summary.inventory_cost_value)}`);
+  }
+
+  lines.push(`${t('Accounts Payable (Supplier Balances)')}: ${formatTZS(summary.accounts_payable)}`);
 
   if (financialsPermitted) {
     lines.push(
@@ -1035,7 +1040,7 @@ function buildShareableReportText({
     if (byProduct.length > 10) {
       lines.push(t('...and {count} more item(s)', { count: byProduct.length - 10 }));
     }
-  } else if (tab === 'inventory' && byCategory.length > 0) {
+  } else if (tab === 'inventory' && canSeeInventoryValuation && byCategory.length > 0) {
     lines.push('----------------------------------------', t('Sales by Category'));
     byCategory.slice(0, 10).forEach((c, idx) => {
       lines.push(`${idx + 1}. ${t(c.category_name)} — ${c.units_sold} | ${formatTZS(c.revenue)}`);
@@ -1059,6 +1064,7 @@ function buildShareableReportText({
 
 export function ReportsScreen({ user, settings }) {
   const { t } = useLanguage();
+  const isAdmin = (user?.role_slugs || []).includes('owner');
   const [data, setData] = useState(null);
   const [startDate, setStartDate] = useState(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
@@ -1069,6 +1075,12 @@ export function ReportsScreen({ user, settings }) {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareFeedback, setShareFeedback] = useState('');
   const [copiedReport, setCopiedReport] = useState(false);
+
+  useEffect(() => {
+    if (!isAdmin && tab === 'inventory') {
+      setTab('sales');
+    }
+  }, [isAdmin, tab]);
 
   const loadReports = async (reportType = 'overview') => {
     setError(null);
@@ -1087,7 +1099,8 @@ export function ReportsScreen({ user, settings }) {
   }, [tab, startDate, endDate]);
 
   const summary = data?.summary || {};
-  const byCategory = data?.sales_by_category || [];
+  const canSeeInventoryValuation = isAdmin && data?.inventory_valuation_permitted !== false;
+  const byCategory = canSeeInventoryValuation ? data?.sales_by_category || [] : [];
   const byProduct = data?.sales_by_product || [];
   const byEmployee = data?.sales_by_employee || [];
   const byProductPg = usePagination(byProduct, 5, `${startDate}|${endDate}`);
@@ -1102,12 +1115,13 @@ export function ReportsScreen({ user, settings }) {
     settings,
     startDate,
     endDate,
-    tab,
+    tab: !canSeeInventoryValuation && tab === 'inventory' ? 'sales' : tab,
     summary,
     byProduct,
     byCategory,
     byEmployee,
     financialsPermitted: Boolean(data?.financials_permitted),
+    canSeeInventoryValuation,
     t,
   });
 
@@ -1162,16 +1176,21 @@ export function ReportsScreen({ user, settings }) {
   };
 
   const handleExportExcel = () => {
-    exportToCsv(`KAMPANGO_Product_Sales_${startDate}_to_${endDate}.csv`, byProduct, [
+    const cols = [
       { label: t('SKU'), accessor: 'sku' },
       { label: t('Product Name'), accessor: 'name' },
       { label: t('Category'), accessor: (row) => t(row.category_name) },
-      { label: t('Current Stock'), accessor: 'current_stock' },
+      ...(canSeeInventoryValuation ? [{ label: t('Current Stock'), accessor: 'current_stock' }] : []),
       { label: t('Units Sold'), accessor: 'units_sold' },
       { label: t('Revenue (TZS)'), accessor: 'revenue' },
-      { label: t('COGS (TZS)'), accessor: 'cogs' },
-      { label: t('Gross Profit (TZS)'), accessor: 'profit' },
-    ]);
+      ...(data?.financials_permitted
+        ? [
+            { label: t('COGS (TZS)'), accessor: 'cogs' },
+            { label: t('Gross Profit (TZS)'), accessor: 'profit' },
+          ]
+        : []),
+    ];
+    exportToCsv(`KAMPANGO_Product_Sales_${startDate}_to_${endDate}.csv`, byProduct, cols);
   };
 
   const handleExportPdf = () => {
@@ -1207,6 +1226,13 @@ export function ReportsScreen({ user, settings }) {
         <tr><th>${t('Accounts Receivable (Customer Debts)')}</th><td class="text-right">${formatTZS(
           summary.accounts_receivable
         )}</td></tr>
+        ${
+          canSeeInventoryValuation
+            ? `<tr><th>${t('Inventory Cost Value')}</th><td class="text-right">${formatTZS(
+                summary.inventory_cost_value
+              )}</td></tr>`
+            : ''
+        }
         <tr><th>${t('Accounts Payable (Supplier Balances)')}</th><td class="text-right">${formatTZS(
           summary.accounts_payable
         )}</td></tr>
@@ -1221,7 +1247,9 @@ export function ReportsScreen({ user, settings }) {
         <div>
           <h1 className="text-xl font-extrabold text-slate-900">{t('Reports & Financial Analytics')}</h1>
           <p className="text-xs text-slate-500">
-            {t('Sales, Inventory, Customer, Supplier, and P&L statements with PDF, Excel & instant sharing')}
+            {isAdmin
+              ? t('Sales, Inventory, Customer, Supplier, and P&L statements with PDF, Excel & instant sharing')
+              : t('Sales, Customer, and Employee operational reports with PDF, Excel & instant sharing')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1353,11 +1381,11 @@ export function ReportsScreen({ user, settings }) {
         </div>
       )}
 
-      {/* Report Tabs (Matches Screen 22 Mockup) */}
-      <div className="flex gap-2 border-b border-slate-200">
+      {/* Report Tabs (Inventory & Valuation is strictly Admin-only) */}
+      <div className="flex gap-2 border-b border-slate-200 overflow-x-auto">
         {[
           { id: 'sales', label: 'Sales & Products' },
-          { id: 'inventory', label: 'Inventory & Valuation' },
+          ...(isAdmin ? [{ id: 'inventory', label: 'Inventory & Valuation' }] : []),
           { id: 'employees', label: 'Sales by Employee' },
           { id: 'finance', label: 'Financial P&L Statement' },
         ].map((tabItem) => (
@@ -1365,7 +1393,7 @@ export function ReportsScreen({ user, settings }) {
             key={tabItem.id}
             type="button"
             onClick={() => setTab(tabItem.id)}
-            className={`px-4 py-2.5 text-xs font-bold border-b-2 ${
+            className={`px-4 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap ${
               tab === tabItem.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'
             }`}
           >
@@ -1381,7 +1409,7 @@ export function ReportsScreen({ user, settings }) {
       ) : (
         <>
           {/* Summary KPI Row */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${canSeeInventoryValuation ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4`}>
             <div className="bg-white rounded-2xl border border-slate-200 p-4">
               <p className="text-xs text-slate-500">{t('Net Sales Revenue')}</p>
               <p className="text-lg font-extrabold text-blue-600 mt-1">
@@ -1400,12 +1428,14 @@ export function ReportsScreen({ user, settings }) {
                 {formatTZS(summary.accounts_receivable)}
               </p>
             </div>
-            <div className="bg-white rounded-2xl border border-slate-200 p-4">
-              <p className="text-xs text-slate-500">{t('Inventory Cost Value')}</p>
-              <p className="text-lg font-extrabold text-slate-900 mt-1">
-                {formatTZS(summary.inventory_cost_value)}
-              </p>
-            </div>
+            {canSeeInventoryValuation && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-4">
+                <p className="text-xs text-slate-500">{t('Inventory Cost Value')}</p>
+                <p className="text-lg font-extrabold text-slate-900 mt-1">
+                  {formatTZS(summary.inventory_cost_value)}
+                </p>
+              </div>
+            )}
           </div>
 
           {tab === 'finance' && data?.financials_permitted && (
@@ -1480,7 +1510,7 @@ export function ReportsScreen({ user, settings }) {
             </div>
           )}
 
-          {tab === 'inventory' && (
+          {tab === 'inventory' && canSeeInventoryValuation && (
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="table-region" tabIndex={0} role="region" aria-label={t('Category sales report')}>
               <table className="w-full text-xs">

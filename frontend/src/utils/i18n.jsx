@@ -1451,6 +1451,8 @@ export const SW_DICTIONARY = {
   'Report summary copied to clipboard!': 'Muhtasari wa ripoti umenakiliwa!',
   'Could not copy report automatically. Please select and copy the text below.': 'Imeshindikana kunakili kiotomatiki. Tafadhali chagua na unakili maandishi hapa chini.',
   'Report shared successfully!': 'Ripoti imeshirikiwa kikamilifu!',
+  'Sales, Customer, and Employee operational reports with PDF, Excel & instant sharing': 'Ripoti za uendeshaji za Mauzo, Wateja na Wafanyakazi zenye PDF, Excel na kushiriki papo hapo',
+  'Access denied: Inventory & valuation reports are reserved for the Shop Admin.': 'Ufikiaji umezuiwa: Ripoti za ghala na thamani ya hisa ni za Msimamizi wa Duka pekee.',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY
