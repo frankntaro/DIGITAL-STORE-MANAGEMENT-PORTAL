@@ -580,11 +580,11 @@ class EmployeeSettingsController extends BaseApiController
         $tables = [
             'roles', 'permissions', 'role_permissions', 'users', 'user_roles', 'user_permissions',
             'shop_settings', 'categories', 'products', 'inventories', 'stock_movements',
-            'suppliers', 'purchases', 'purchase_items', 'supplier_payments',
+            'suppliers', 'purchases', 'purchase_items', 'purchase_missing_items', 'supplier_payments',
             'customers', 'sales', 'sale_items', 'customer_payments',
             'cash_sessions', 'cash_movements', 'expenses',
             'returns', 'return_items', 'warranties', 'warranty_claims', 'audit_logs', 'sync_records',
-            'stock_transfers', 'stock_transfer_items'
+            'stock_transfers', 'stock_transfer_items', 'admin_notifications'
         ];
 
         $snapshot = [

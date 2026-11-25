@@ -115,15 +115,16 @@ class CatalogInventoryController extends BaseApiController
             )";
         }
         if ($search !== '') {
-            $where[] = "(p.`name` LIKE ? OR p.`sku` LIKE ? OR p.`barcode` LIKE ? OR p.`brand` LIKE ? OR p.`model` LIKE ?)";
+            $where[] = "(p.`name` LIKE ? OR p.`sku` LIKE ? OR p.`barcode` LIKE ? OR p.`brand` LIKE ? OR p.`model` LIKE ? OR p.`ram_gb` LIKE ? OR p.`storage_gb` LIKE ?)";
             $like = "%{$search}%";
-            array_push($params, $like, $like, $like, $like, $like);
+            array_push($params, $like, $like, $like, $like, $like, $like, $like);
         }
 
         $whereSql = implode(' AND ', $where);
         $stmt = $pdo->prepare("
             SELECT p.*,
                    c.`name` AS category_name,
+                   c.`slug` AS category_slug,
                    c.`icon` AS category_icon,
                    COALESCE(i.`available_quantity`, 0) AS available_quantity,
                    COALESCE(i.`reserved_offline_quantity`, 0) AS reserved_offline_quantity,
@@ -189,10 +190,52 @@ class CatalogInventoryController extends BaseApiController
         self::json(['success' => true, 'products' => $stmt->fetchAll()]);
     }
 
+    private static function normalizeCapacitySpec(mixed $raw): ?string
+    {
+        if ($raw === null) {
+            return null;
+        }
+        $val = trim((string) $raw);
+        if ($val === '') {
+            return null;
+        }
+        if (preg_match('/^\d+(?:\.\d+)?$/', $val)) {
+            $val .= 'GB';
+        } else {
+            $val = preg_replace_callback('/\s*(mb|gb|tb)$/i', fn ($m) => strtoupper($m[1]), $val) ?? $val;
+        }
+        return substr($val, 0, 30);
+    }
+
+    private static function normalizePositiveIntOrNull(mixed $raw): ?int
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $n = (int) $raw;
+        return $n > 0 ? $n : null;
+    }
+
+    private static function isFeaturePhoneCategory(PDO $pdo, int $categoryId): bool
+    {
+        if ($categoryId <= 0) {
+            return false;
+        }
+        $stmt = $pdo->prepare("SELECT `slug`, `name` FROM `categories` WHERE `id` = ? LIMIT 1");
+        $stmt->execute([$categoryId]);
+        $cat = $stmt->fetch();
+        if (!$cat) {
+            return false;
+        }
+        $slug = strtolower((string) ($cat['slug'] ?? ''));
+        $name = strtolower((string) ($cat['name'] ?? ''));
+        return $slug === 'feature-phones' || str_contains($name, 'simu ndogo') || str_contains($name, 'feature phone');
+    }
+
     public static function getProductDetails(PDO $pdo, array $user, int $productId): never
     {
         $stmt = $pdo->prepare("
-            SELECT p.*, c.`name` AS category_name,
+            SELECT p.*, c.`name` AS category_name, c.`slug` AS category_slug,
                    COALESCE(i.`available_quantity`, 0) AS available_quantity,
                    COALESCE(i.`damaged_quantity`, 0) AS damaged_quantity,
                    COALESCE(i.`under_inspection_quantity`, 0) AS under_inspection_quantity,
@@ -236,6 +279,11 @@ class CatalogInventoryController extends BaseApiController
         $barcode = trim((string) ($data['barcode'] ?? '')) ?: null;
         $brand = trim((string) ($data['brand'] ?? '')) ?: null;
         $model = trim((string) ($data['model'] ?? '')) ?: null;
+        $isFeaturePhone = self::isFeaturePhoneCategory($pdo, $categoryId);
+        $ramGb = $isFeaturePhone ? null : self::normalizeCapacitySpec($data['ram_gb'] ?? null);
+        $storageGb = $isFeaturePhone ? null : self::normalizeCapacitySpec($data['storage_gb'] ?? null);
+        $boxCount = self::normalizePositiveIntOrNull($data['box_count'] ?? null);
+        $itemsPerBox = self::normalizePositiveIntOrNull($data['items_per_box'] ?? null);
         $description = trim((string) ($data['description'] ?? '')) ?: null;
         $purchasePrice = (float) ($data['purchase_price'] ?? 0);
         $sellingPrice = (float) ($data['selling_price'] ?? 0);
@@ -244,9 +292,13 @@ class CatalogInventoryController extends BaseApiController
         $unit = in_array($rawUnit, ['piece', 'meter'], true) ? $rawUnit : ($isCarpetName ? 'meter' : 'piece');
         $minStock = round(max(0.0, (float) ($data['min_stock_level'] ?? 5)), 2);
         $warrantyMonths = (int) ($data['warranty_months'] ?? 12);
+        $rawInitialQty = $data['initial_quantity'] ?? $data['available_quantity'] ?? null;
+        if (($rawInitialQty === null || $rawInitialQty === '') && $boxCount !== null && $itemsPerBox !== null) {
+            $rawInitialQty = $boxCount * $itemsPerBox;
+        }
         $initialQty = $unit === 'meter'
-            ? round(max(0.0, (float) ($data['initial_quantity'] ?? 0)), 2)
-            : (float) max(0, (int) round((float) ($data['initial_quantity'] ?? 0)));
+            ? round(max(0.0, (float) ($rawInitialQty ?? 0)), 2)
+            : (float) max(0, (int) round((float) ($rawInitialQty ?? 0)));
         $imageUrl = trim((string) ($data['image_url'] ?? '')) ?: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=300&q=80';
 
         if ($name === '' || $categoryId <= 0 || $sellingPrice <= 0) {
@@ -267,13 +319,15 @@ class CatalogInventoryController extends BaseApiController
         try {
             $stmt = $pdo->prepare("
                 INSERT INTO `products` (
-                    `sku`, `barcode`, `name`, `category_id`, `brand`, `model`, `description`,
+                    `sku`, `barcode`, `name`, `category_id`, `brand`, `model`,
+                    `ram_gb`, `storage_gb`, `box_count`, `items_per_box`, `description`,
                     `purchase_price`, `selling_price`, `weighted_avg_cost`, `unit`, `min_stock_level`,
                     `warranty_months`, `image_url`, `status`, `created_by`
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
             ");
             $stmt->execute([
-                $sku, $barcode, $name, $categoryId, $brand, $model, $description,
+                $sku, $barcode, $name, $categoryId, $brand, $model,
+                $ramGb, $storageGb, $boxCount, $itemsPerBox, $description,
                 $purchasePrice, $sellingPrice, $purchasePrice, $unit, $minStock,
                 $warrantyMonths, $imageUrl, $user['id']
             ]);
@@ -345,6 +399,21 @@ class CatalogInventoryController extends BaseApiController
 
         $pdo->beginTransaction();
         try {
+            $newCategoryId = (int) ($data['category_id'] ?? $before['category_id']);
+            $isFeaturePhone = self::isFeaturePhoneCategory($pdo, $newCategoryId);
+            $newRamGb = $isFeaturePhone
+                ? null
+                : (array_key_exists('ram_gb', $data) ? self::normalizeCapacitySpec($data['ram_gb']) : ($before['ram_gb'] ?? null));
+            $newStorageGb = $isFeaturePhone
+                ? null
+                : (array_key_exists('storage_gb', $data) ? self::normalizeCapacitySpec($data['storage_gb']) : ($before['storage_gb'] ?? null));
+            $newBoxCount = array_key_exists('box_count', $data)
+                ? self::normalizePositiveIntOrNull($data['box_count'])
+                : ($before['box_count'] ?? null);
+            $newItemsPerBox = array_key_exists('items_per_box', $data)
+                ? self::normalizePositiveIntOrNull($data['items_per_box'])
+                : ($before['items_per_box'] ?? null);
+
             $newStatus = (isset($data['status']) && in_array($data['status'], ['active', 'archived'], true))
                 ? $data['status']
                 : (in_array($before['status'], ['active', 'archived'], true) ? $before['status'] : 'active');
@@ -361,6 +430,10 @@ class CatalogInventoryController extends BaseApiController
                     `barcode` = ?,
                     `brand` = ?,
                     `model` = ?,
+                    `ram_gb` = ?,
+                    `storage_gb` = ?,
+                    `box_count` = ?,
+                    `items_per_box` = ?,
                     `description` = ?,
                     `purchase_price` = ?,
                     `selling_price` = ?,
@@ -372,11 +445,15 @@ class CatalogInventoryController extends BaseApiController
                 WHERE `id` = ?
             ")->execute([
                 trim((string) ($data['name'] ?? $before['name'])),
-                (int) ($data['category_id'] ?? $before['category_id']),
+                $newCategoryId,
                 strtoupper(trim((string) ($data['sku'] ?? $before['sku']))),
                 isset($data['barcode']) ? (trim((string) $data['barcode']) ?: null) : $before['barcode'],
                 isset($data['brand']) ? (trim((string) $data['brand']) ?: null) : $before['brand'],
                 isset($data['model']) ? (trim((string) $data['model']) ?: null) : $before['model'],
+                $newRamGb,
+                $newStorageGb,
+                $newBoxCount,
+                $newItemsPerBox,
                 isset($data['description']) ? (trim((string) $data['description']) ?: null) : $before['description'],
                 $newPurchasePrice,
                 $newSellingPrice,
@@ -388,6 +465,66 @@ class CatalogInventoryController extends BaseApiController
                 $productId,
             ]);
 
+            // Allow Admin to edit stock quantity directly during Edit Product with full stock_movements audit trail
+            $invStmt = $pdo->prepare("SELECT * FROM `inventories` WHERE `product_id` = ? FOR UPDATE");
+            $invStmt->execute([$productId]);
+            $inv = $invStmt->fetch();
+            $prevStockQty = $inv ? round((float) $inv['available_quantity'], 2) : 0.0;
+            $updatedStockQty = $prevStockQty;
+            $stockChanged = false;
+
+            $hasStockPayload = array_key_exists('available_quantity', $data) || array_key_exists('initial_quantity', $data);
+            $rawStockPayload = array_key_exists('available_quantity', $data)
+                ? $data['available_quantity']
+                : ($data['initial_quantity'] ?? null);
+
+            if ($hasStockPayload && $rawStockPayload !== null && $rawStockPayload !== '') {
+                $targetStockQty = $newUnit === 'meter'
+                    ? round(max(0.0, (float) $rawStockPayload), 2)
+                    : (float) max(0, (int) round((float) $rawStockPayload));
+
+                if (abs($targetStockQty - $prevStockQty) > 0.001) {
+                    $stockChanged = true;
+                    $updatedStockQty = $targetStockQty;
+                    $invCost = $inv ? (float) $inv['unit_cost'] : $newPurchasePrice;
+
+                    if ($inv) {
+                        $pdo->prepare("
+                            UPDATE `inventories`
+                            SET `available_quantity` = ?, `last_counted_at` = NOW()
+                            WHERE `product_id` = ?
+                        ")->execute([$targetStockQty, $productId]);
+                    } else {
+                        $pdo->prepare("
+                            INSERT INTO `inventories` (`product_id`, `available_quantity`, `unit_cost`, `last_counted_at`)
+                            VALUES (?, ?, ?, NOW())
+                        ")->execute([$productId, $targetStockQty, $newPurchasePrice]);
+                    }
+
+                    $diffQty = round($targetStockQty - $prevStockQty, 2);
+                    $movType = $diffQty > 0 ? 'adjustment_increase' : 'adjustment_decrease';
+                    $pdo->prepare("
+                        INSERT INTO `stock_movements` (
+                            `uuid`, `product_id`, `movement_type`, `previous_quantity`, `change_quantity`,
+                            `new_quantity`, `unit_cost`, `reference_type`, `reference_id`, `reason`, `notes`, `user_id`, `approved_by`
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Product', ?, ?, ?, ?, ?)
+                    ")->execute([
+                        self::uuid('sm'),
+                        $productId,
+                        $movType,
+                        $prevStockQty,
+                        $diffQty,
+                        $targetStockQty,
+                        $invCost,
+                        $productId,
+                        'Stock quantity edited from Product Management',
+                        trim((string) ($data['reason'] ?? 'Updated product stock quantity during product edit')),
+                        $user['id'],
+                        $user['id'],
+                    ]);
+                }
+            }
+
             $priceChanged = abs($newPurchasePrice - (float) $before['purchase_price']) > 0.01
                 || abs($newSellingPrice - (float) $before['selling_price']) > 0.01;
 
@@ -397,13 +534,34 @@ class CatalogInventoryController extends BaseApiController
                 $priceChanged ? 'product.price_changed' : 'product.updated',
                 'Product',
                 $productId,
-                ['name' => $before['name'], 'purchase_price' => $before['purchase_price'], 'selling_price' => $before['selling_price'], 'status' => $before['status']],
-                ['name' => $data['name'] ?? $before['name'], 'purchase_price' => $newPurchasePrice, 'selling_price' => $newSellingPrice, 'status' => $newStatus],
-                $data['reason'] ?? 'Updated product information'
+                [
+                    'name'           => $before['name'],
+                    'purchase_price' => $before['purchase_price'],
+                    'selling_price'  => $before['selling_price'],
+                    'status'         => $before['status'],
+                    'stock_quantity' => $prevStockQty,
+                ],
+                [
+                    'name'           => $data['name'] ?? $before['name'],
+                    'purchase_price' => $newPurchasePrice,
+                    'selling_price'  => $newSellingPrice,
+                    'status'         => $newStatus,
+                    'stock_quantity' => $updatedStockQty,
+                    'ram_gb'         => $newRamGb,
+                    'storage_gb'     => $newStorageGb,
+                    'box_count'      => $newBoxCount,
+                    'items_per_box'  => $newItemsPerBox,
+                ],
+                $data['reason'] ?? ($stockChanged ? 'Updated product details and stock quantity' : 'Updated product information')
             );
 
             $pdo->commit();
-            self::json(['success' => true, 'message' => 'Product updated successfully.']);
+            self::json([
+                'success'            => true,
+                'message'            => 'Product updated successfully.',
+                'available_quantity' => $updatedStockQty,
+                'stock_changed'      => $stockChanged,
+            ]);
         } catch (\Throwable $e) {
             $pdo->rollBack();
             self::error('Failed to update product: ' . $e->getMessage(), 500);
@@ -746,7 +904,8 @@ class CatalogInventoryController extends BaseApiController
                    s.`name` AS supplier_name,
                    s.`phone` AS supplier_phone,
                    u.`full_name` AS recorded_by_name,
-                   ua.`full_name` AS approved_by_name
+                   ua.`full_name` AS approved_by_name,
+                   (SELECT COUNT(*) FROM `purchase_missing_items` pmi WHERE pmi.`purchase_id` = p.`id` AND pmi.`status` = 'missing') AS unresolved_missing_count
             FROM `purchases` p
             INNER JOIN `suppliers` s ON s.`id` = p.`supplier_id`
             LEFT JOIN `users` u ON u.`id` = p.`recorded_by`
@@ -759,6 +918,7 @@ class CatalogInventoryController extends BaseApiController
 
         $itemStmt = $pdo->prepare("
             SELECT pi.*,
+                   GREATEST(0, pi.`ordered_quantity` - pi.`received_quantity`) AS missing_quantity,
                    pr.`name` AS product_name,
                    pr.`sku`,
                    pr.`unit`,
@@ -777,11 +937,13 @@ class CatalogInventoryController extends BaseApiController
         unset($pur);
 
         $pendingCount = (int) $pdo->query("SELECT COUNT(*) FROM `purchases` WHERE `status` = 'pending'")->fetchColumn();
+        $missingItemsCount = (int) $pdo->query("SELECT COUNT(*) FROM `purchase_missing_items` WHERE `status` = 'missing'")->fetchColumn();
 
         self::json([
-            'success'       => true,
-            'purchases'     => $purchases,
-            'pending_count' => $pendingCount,
+            'success'             => true,
+            'purchases'           => $purchases,
+            'pending_count'       => $pendingCount,
+            'missing_items_count' => $missingItemsCount,
         ]);
     }
 
@@ -868,6 +1030,15 @@ class CatalogInventoryController extends BaseApiController
                 INSERT INTO `purchase_items` (`purchase_id`, `product_id`, `ordered_quantity`, `received_quantity`, `unit_purchase_price`, `line_total`)
                 VALUES (?, ?, ?, ?, ?, ?)
             ");
+            $prodSnapStmt = $pdo->prepare("SELECT `name`, `sku`, `unit` FROM `products` WHERE `id` = ? LIMIT 1");
+            $missingStmt = $pdo->prepare("
+                INSERT INTO `purchase_missing_items` (
+                    `purchase_id`, `purchase_item_id`, `supplier_id`, `product_id`,
+                    `purchase_reference`, `product_name_snapshot`, `sku_snapshot`, `unit_snapshot`,
+                    `ordered_quantity`, `received_quantity`, `missing_quantity`,
+                    `unit_purchase_price`, `missing_value`, `status`, `notes`, `recorded_by`
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', ?, ?)
+            ");
 
             // SRS 3.4: Only approved/received quantities increase available stock & update Weighted Average Cost
             foreach ($preparedItems as $pi) {
@@ -875,6 +1046,32 @@ class CatalogInventoryController extends BaseApiController
                     $purchaseId, $pi['product_id'], $pi['ordered_quantity'],
                     $pi['received_quantity'], $pi['unit_purchase_price'], $pi['line_total']
                 ]);
+                $purchaseItemId = (int) $pdo->lastInsertId();
+
+                if (!$isPendingOrDraft) {
+                    $missingQty = round(max(0.0, $pi['ordered_quantity'] - $pi['received_quantity']), 2);
+                    if ($missingQty > 0.001) {
+                        $prodSnapStmt->execute([$pi['product_id']]);
+                        $ps = $prodSnapStmt->fetch() ?: ['name' => 'Product #' . $pi['product_id'], 'sku' => '', 'unit' => 'piece'];
+                        $missingStmt->execute([
+                            $purchaseId,
+                            $purchaseItemId,
+                            $supplierId,
+                            $pi['product_id'],
+                            $refNo,
+                            (string) $ps['name'],
+                            (string) $ps['sku'],
+                            (string) ($ps['unit'] ?: 'piece'),
+                            $pi['ordered_quantity'],
+                            $pi['received_quantity'],
+                            $missingQty,
+                            $pi['unit_purchase_price'],
+                            round($missingQty * $pi['unit_purchase_price'], 2),
+                            $notes,
+                            $user['id'],
+                        ]);
+                    }
+                }
 
                 if ($pi['received_quantity'] > 0) {
                     $invStmt = $pdo->prepare("SELECT * FROM `inventories` WHERE `product_id` = ? FOR UPDATE");
@@ -1011,7 +1208,7 @@ class CatalogInventoryController extends BaseApiController
             }
 
             $itemStmt = $pdo->prepare("
-                SELECT pi.*, pr.`name` AS product_name
+                SELECT pi.*, pr.`name` AS product_name, pr.`sku` AS product_sku, pr.`unit` AS product_unit
                 FROM `purchase_items` pi
                 INNER JOIN `products` pr ON pr.`id` = pi.`product_id`
                 WHERE pi.`purchase_id` = ?
@@ -1037,9 +1234,20 @@ class CatalogInventoryController extends BaseApiController
 
             $subtotal = 0.0;
             $totalReceivedUnits = 0.0;
+            $totalMissingUnits = 0.0;
             $stockUpdates = [];
+            $missingItemsRecorded = [];
             $refNo = $purchase['reference_number'];
             $approvalNotes = trim((string) ($data['approval_notes'] ?? '')) ?: null;
+
+            $insMissingStmt = $pdo->prepare("
+                INSERT INTO `purchase_missing_items` (
+                    `purchase_id`, `purchase_item_id`, `supplier_id`, `product_id`,
+                    `purchase_reference`, `product_name_snapshot`, `sku_snapshot`, `unit_snapshot`,
+                    `ordered_quantity`, `received_quantity`, `missing_quantity`,
+                    `unit_purchase_price`, `missing_value`, `status`, `notes`, `recorded_by`
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', ?, ?)
+            ");
 
             foreach ($orderItems as $item) {
                 $itemId = (int) $item['id'];
@@ -1048,11 +1256,13 @@ class CatalogInventoryController extends BaseApiController
                 $receivedQty = array_key_exists($itemId, $qtyOverrides)
                     ? $qtyOverrides[$itemId]
                     : $orderedQty;
+                $missingQty = round(max(0.0, $orderedQty - $receivedQty), 2);
                 $unitCost = (float) $item['unit_purchase_price'];
                 $lineTotal = round($receivedQty * $unitCost, 2);
 
                 $subtotal += $lineTotal;
                 $totalReceivedUnits += $receivedQty;
+                $totalMissingUnits += $missingQty;
 
                 $pdo->prepare("
                     UPDATE `purchase_items`
@@ -1116,13 +1326,50 @@ class CatalogInventoryController extends BaseApiController
                         'new_quantity'      => $newQty,
                     ];
                 }
+
+                // Automatically log any shortfall into Missing Ordered Products
+                if ($missingQty > 0.001) {
+                    $missingValue = round($missingQty * $unitCost, 2);
+                    $insMissingStmt->execute([
+                        $purchaseId,
+                        $itemId,
+                        (int) $purchase['supplier_id'],
+                        $productId,
+                        $refNo,
+                        (string) $item['product_name'],
+                        (string) ($item['product_sku'] ?? ''),
+                        (string) ($item['product_unit'] ?: 'piece'),
+                        $orderedQty,
+                        $receivedQty,
+                        $missingQty,
+                        $unitCost,
+                        $missingValue,
+                        $approvalNotes,
+                        $user['id'],
+                    ]);
+                    $missingItemsRecorded[] = [
+                        'id'                  => (int) $pdo->lastInsertId(),
+                        'purchase_id'         => $purchaseId,
+                        'purchase_reference'  => $refNo,
+                        'product_id'          => $productId,
+                        'product_name'        => $item['product_name'],
+                        'sku'                 => $item['product_sku'] ?? '',
+                        'unit'                => $item['product_unit'] ?: 'piece',
+                        'ordered_quantity'    => $orderedQty,
+                        'received_quantity'   => $receivedQty,
+                        'missing_quantity'    => $missingQty,
+                        'unit_purchase_price' => $unitCost,
+                        'missing_value'       => $missingValue,
+                    ];
+                }
             }
 
-            if ($totalReceivedUnits <= 0) {
+            if ($totalReceivedUnits <= 0 && empty($missingItemsRecorded)) {
                 $pdo->rollBack();
-                self::error('At least one product must have received quantity greater than 0 to approve this order.', 422);
+                self::error('At least one product must have received or missing quantity to process this order.', 422);
             }
 
+            $finalStatus = !empty($missingItemsRecorded) ? 'partially_received' : 'received';
             $additionalCosts = (float) $purchase['additional_costs'];
             $totalAmount = round($subtotal + $additionalCosts, 2);
             $paymentMethod = trim((string) ($data['payment_method'] ?? $purchase['payment_method'] ?? 'Cash'));
@@ -1142,7 +1389,7 @@ class CatalogInventoryController extends BaseApiController
             $now = date('Y-m-d H:i:s');
             $pdo->prepare("
                 UPDATE `purchases`
-                SET `status` = 'received',
+                SET `status` = ?,
                     `subtotal_amount` = ?,
                     `total_amount` = ?,
                     `amount_paid` = ?,
@@ -1155,7 +1402,7 @@ class CatalogInventoryController extends BaseApiController
                     `received_at` = ?
                 WHERE `id` = ?
             ")->execute([
-                $subtotal, $totalAmount, $amountPaid, $outstandingBalance,
+                $finalStatus, $subtotal, $totalAmount, $amountPaid, $outstandingBalance,
                 $paymentStatus, $paymentMethod, $combinedNotes,
                 $user['id'], $now, $now, $purchaseId,
             ]);
@@ -1198,8 +1445,10 @@ class CatalogInventoryController extends BaseApiController
                 ['status' => $purchase['status']],
                 [
                     'reference_number'     => $refNo,
-                    'status'               => 'received',
+                    'status'               => $finalStatus,
                     'total_received_units' => $totalReceivedUnits,
+                    'total_missing_units'  => $totalMissingUnits,
+                    'missing_items_count'  => count($missingItemsRecorded),
                     'total_amount'         => $totalAmount,
                     'amount_paid'          => $amountPaid,
                 ],
@@ -1207,11 +1456,17 @@ class CatalogInventoryController extends BaseApiController
             );
 
             $pdo->commit();
+            $missingCount = count($missingItemsRecorded);
             self::json([
                 'success'       => true,
-                'message'       => "Order {$refNo} approved! Stock automatically updated across the entire system.",
+                'message'       => $missingCount > 0
+                    ? "Order {$refNo} approved for arrived items! {$missingCount} missing item(s) moved to Missing Ordered Products."
+                    : "Order {$refNo} approved! Stock automatically updated across the entire system.",
                 'purchase_id'   => $purchaseId,
+                'status'        => $finalStatus,
                 'stock_updates' => $stockUpdates,
+                'missing_items' => $missingItemsRecorded,
+                'missing_count' => $missingCount,
             ]);
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -1219,6 +1474,316 @@ class CatalogInventoryController extends BaseApiController
             }
             self::error('Failed to approve order: ' . $e->getMessage(), 500);
         }
+    }
+
+    public static function listMissingPurchaseItems(PDO $pdo, array $user): never
+    {
+        self::requirePermission($user, 'purchases.view');
+
+        $status = trim((string) ($_GET['status'] ?? 'missing'));
+        $supplierId = isset($_GET['supplier_id']) && $_GET['supplier_id'] !== '' ? (int) $_GET['supplier_id'] : null;
+        $purchaseId = isset($_GET['purchase_id']) && $_GET['purchase_id'] !== '' ? (int) $_GET['purchase_id'] : null;
+
+        $where = ['1=1'];
+        $params = [];
+        if (in_array($status, ['missing', 'resolved'], true)) {
+            $where[] = "pmi.`status` = ?";
+            $params[] = $status;
+        }
+        if ($supplierId) {
+            $where[] = "pmi.`supplier_id` = ?";
+            $params[] = $supplierId;
+        }
+        if ($purchaseId) {
+            $where[] = "pmi.`purchase_id` = ?";
+            $params[] = $purchaseId;
+        }
+
+        $whereSql = implode(' AND ', $where);
+        $stmt = $pdo->prepare("
+            SELECT pmi.*,
+                   pur.`purchase_date`,
+                   pur.`approved_at`,
+                   s.`name` AS supplier_name,
+                   s.`phone` AS supplier_phone,
+                   s.`email` AS supplier_email,
+                   u1.`full_name` AS recorded_by_name,
+                   u2.`full_name` AS resolved_by_name
+            FROM `purchase_missing_items` pmi
+            INNER JOIN `purchases` pur ON pur.`id` = pmi.`purchase_id`
+            INNER JOIN `suppliers` s ON s.`id` = pmi.`supplier_id`
+            LEFT JOIN `users` u1 ON u1.`id` = pmi.`recorded_by`
+            LEFT JOIN `users` u2 ON u2.`id` = pmi.`resolved_by`
+            WHERE {$whereSql}
+            ORDER BY CASE WHEN pmi.`status` = 'missing' THEN 0 ELSE 1 END ASC, pmi.`id` DESC
+        ");
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        $unresolvedTotals = $pdo->query("
+            SELECT COUNT(*) AS items_count,
+                   COALESCE(SUM(`missing_quantity`), 0) AS units_total,
+                   COALESCE(SUM(`missing_value`), 0) AS value_total
+            FROM `purchase_missing_items`
+            WHERE `status` = 'missing'
+        ")->fetch() ?: ['items_count' => 0, 'units_total' => 0, 'value_total' => 0];
+
+        $suppliersWithMissing = $pdo->query("
+            SELECT DISTINCT s.`id`, s.`name`, s.`phone`
+            FROM `purchase_missing_items` pmi
+            INNER JOIN `suppliers` s ON s.`id` = pmi.`supplier_id`
+            ORDER BY s.`name` ASC
+        ")->fetchAll();
+
+        $shopSettings = $pdo->query("SELECT `shop_name`, `shop_address`, `contact_phone`, `contact_email`, `tin_number` FROM `shop_settings` ORDER BY `id` ASC LIMIT 1")->fetch() ?: [];
+
+        $filteredUnits = 0.0;
+        $filteredValue = 0.0;
+        foreach ($rows as $r) {
+            $filteredUnits += (float) ($r['missing_quantity'] ?? 0);
+            $filteredValue += (float) ($r['missing_value'] ?? 0);
+        }
+
+        self::json([
+            'success'       => true,
+            'missing_items' => $rows,
+            'suppliers'     => $suppliersWithMissing,
+            'shop_settings' => $shopSettings,
+            'summary'       => [
+                'unresolved_items_count' => (int) ($unresolvedTotals['items_count'] ?? 0),
+                'unresolved_units_total' => round((float) ($unresolvedTotals['units_total'] ?? 0), 2),
+                'unresolved_value_total' => round((float) ($unresolvedTotals['value_total'] ?? 0), 2),
+                'filtered_items_count'   => count($rows),
+                'filtered_units_total'   => round($filteredUnits, 2),
+                'filtered_value_total'   => round($filteredValue, 2),
+            ],
+        ]);
+    }
+
+    public static function receiveMissingPurchaseItem(PDO $pdo, array $user, int $missingItemId): never
+    {
+        self::requirePermission($user, 'purchases.manage');
+        $data = self::input();
+
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare("SELECT * FROM `purchase_missing_items` WHERE `id` = ? FOR UPDATE");
+            $stmt->execute([$missingItemId]);
+            $missingRow = $stmt->fetch();
+            if (!$missingRow) {
+                $pdo->rollBack();
+                self::error('Missing order item record not found.', 404);
+            }
+            if ($missingRow['status'] !== 'missing' || (float) $missingRow['missing_quantity'] <= 0.001) {
+                $pdo->rollBack();
+                self::error('This missing item has already been resolved.', 422);
+            }
+
+            $currentMissing = round((float) $missingRow['missing_quantity'], 2);
+            $requestedQty = isset($data['quantity']) && $data['quantity'] !== ''
+                ? round((float) $data['quantity'], 2)
+                : $currentMissing;
+            if ($requestedQty <= 0 || $requestedQty > $currentMissing + 0.001) {
+                $pdo->rollBack();
+                self::error("Quantity received must be between 0.01 and {$currentMissing}.", 422);
+            }
+            $receiveQty = min($currentMissing, $requestedQty);
+            $unitCost = (float) $missingRow['unit_purchase_price'];
+            $productId = (int) $missingRow['product_id'];
+            $purchaseId = (int) $missingRow['purchase_id'];
+            $purchaseItemId = (int) $missingRow['purchase_item_id'];
+            $refNo = (string) $missingRow['purchase_reference'];
+            $notes = trim((string) ($data['notes'] ?? '')) ?: null;
+
+            // Update inventory & weighted average cost
+            $invStmt = $pdo->prepare("SELECT * FROM `inventories` WHERE `product_id` = ? FOR UPDATE");
+            $invStmt->execute([$productId]);
+            $inv = $invStmt->fetch();
+
+            $prevQty = $inv ? round((float) $inv['available_quantity'], 2) : 0.0;
+            $prevCost = $inv ? (float) $inv['unit_cost'] : $unitCost;
+            $newQty = round($prevQty + $receiveQty, 2);
+            $newWeightedCost = FinancialService::calculateWeightedAverageCost($prevQty, $prevCost, $receiveQty, $unitCost);
+
+            if ($inv) {
+                $pdo->prepare("
+                    UPDATE `inventories`
+                    SET `available_quantity` = ?, `unit_cost` = ?, `last_counted_at` = NOW()
+                    WHERE `product_id` = ?
+                ")->execute([$newQty, $newWeightedCost, $productId]);
+            } else {
+                $pdo->prepare("
+                    INSERT INTO `inventories` (`product_id`, `available_quantity`, `unit_cost`, `last_counted_at`)
+                    VALUES (?, ?, ?, NOW())
+                ")->execute([$productId, $newQty, $newWeightedCost]);
+            }
+
+            $pdo->prepare("
+                UPDATE `products`
+                SET `purchase_price` = ?, `weighted_avg_cost` = ?
+                WHERE `id` = ?
+            ")->execute([$unitCost, $newWeightedCost, $productId]);
+
+            $pdo->prepare("
+                INSERT INTO `stock_movements` (
+                    `uuid`, `product_id`, `movement_type`, `previous_quantity`, `change_quantity`,
+                    `new_quantity`, `unit_cost`, `reference_type`, `reference_id`, `reason`, `notes`, `user_id`, `approved_by`
+                ) VALUES (?, ?, 'purchase_receipt', ?, ?, ?, ?, 'Purchase', ?, ?, ?, ?, ?)
+            ")->execute([
+                self::uuid('sm'),
+                $productId,
+                $prevQty,
+                $receiveQty,
+                $newQty,
+                $unitCost,
+                $purchaseId,
+                "Received missing balance for order {$refNo}",
+                $notes ?? $missingRow['notes'],
+                $user['id'],
+                $user['id'],
+            ]);
+
+            // Update purchase_items
+            $piStmt = $pdo->prepare("SELECT * FROM `purchase_items` WHERE `id` = ? FOR UPDATE");
+            $piStmt->execute([$purchaseItemId]);
+            $piRow = $piStmt->fetch();
+            if ($piRow) {
+                $newPiReceived = round((float) $piRow['received_quantity'] + $receiveQty, 2);
+                $newPiLineTotal = round($newPiReceived * (float) $piRow['unit_purchase_price'], 2);
+                $pdo->prepare("
+                    UPDATE `purchase_items`
+                    SET `received_quantity` = ?, `line_total` = ?
+                    WHERE `id` = ?
+                ")->execute([$newPiReceived, $newPiLineTotal, $purchaseItemId]);
+            }
+
+            // Update purchase_missing_items
+            $newReceivedSnapshot = round((float) $missingRow['received_quantity'] + $receiveQty, 2);
+            $newRemainingMissing = round(max(0.0, $currentMissing - $receiveQty), 2);
+            $newMissingValue = round($newRemainingMissing * $unitCost, 2);
+            $isResolvedNow = $newRemainingMissing <= 0.001;
+
+            $combinedNotes = $missingRow['notes'];
+            if ($notes) {
+                $combinedNotes = trim(($combinedNotes ? $combinedNotes . ' | ' : '') . "Received {$receiveQty}: {$notes}");
+            }
+
+            $pdo->prepare("
+                UPDATE `purchase_missing_items`
+                SET `received_quantity` = ?,
+                    `missing_quantity` = ?,
+                    `missing_value` = ?,
+                    `status` = ?,
+                    `notes` = ?,
+                    `resolved_by` = ?,
+                    `resolved_at` = ?
+                WHERE `id` = ?
+            ")->execute([
+                $newReceivedSnapshot,
+                $newRemainingMissing,
+                $newMissingValue,
+                $isResolvedNow ? 'resolved' : 'missing',
+                $combinedNotes,
+                $isResolvedNow ? $user['id'] : null,
+                $isResolvedNow ? date('Y-m-d H:i:s') : null,
+                $missingItemId,
+            ]);
+
+            // Recalculate parent purchase totals & status
+            $purStmt = $pdo->prepare("SELECT * FROM `purchases` WHERE `id` = ? FOR UPDATE");
+            $purStmt->execute([$purchaseId]);
+            $purchase = $purStmt->fetch();
+            if ($purchase) {
+                $newSubtotal = (float) $pdo->query("SELECT COALESCE(SUM(`line_total`), 0) FROM `purchase_items` WHERE `purchase_id` = {$purchaseId}")->fetchColumn();
+                $newTotal = round($newSubtotal + (float) $purchase['additional_costs'], 2);
+                $paid = (float) $purchase['amount_paid'];
+                $newOutstanding = round(max(0.0, $newTotal - $paid), 2);
+                $newPayStatus = $paid <= 0 ? 'unpaid' : ($newOutstanding <= 0.01 ? 'paid' : 'partial');
+                $stillMissing = (int) $pdo->query("SELECT COUNT(*) FROM `purchase_missing_items` WHERE `purchase_id` = {$purchaseId} AND `status` = 'missing'")->fetchColumn();
+                $newPurStatus = $stillMissing === 0 ? 'received' : 'partially_received';
+
+                $pdo->prepare("
+                    UPDATE `purchases`
+                    SET `status` = ?, `subtotal_amount` = ?, `total_amount` = ?, `outstanding_balance` = ?, `payment_status` = ?
+                    WHERE `id` = ?
+                ")->execute([$newPurStatus, $newSubtotal, $newTotal, $newOutstanding, $newPayStatus, $purchaseId]);
+            }
+
+            AuditService::log(
+                $pdo,
+                (int) $user['id'],
+                'purchase.missing_received',
+                'Purchase',
+                $purchaseId,
+                ['missing_quantity' => $currentMissing],
+                [
+                    'product_id'       => $productId,
+                    'received_now'     => $receiveQty,
+                    'remaining_missing'=> $newRemainingMissing,
+                    'new_stock'        => $newQty,
+                ],
+                $notes ?? "Received {$receiveQty} missing unit(s) for {$missingRow['product_name_snapshot']} on order {$refNo}"
+            );
+
+            $pdo->commit();
+            self::json([
+                'success'           => true,
+                'message'           => $isResolvedNow
+                    ? "Received {$receiveQty} missing unit(s) of {$missingRow['product_name_snapshot']}. Stock updated and missing item resolved!"
+                    : "Received {$receiveQty} unit(s) of {$missingRow['product_name_snapshot']}. {$newRemainingMissing} still missing.",
+                'new_stock'         => $newQty,
+                'remaining_missing' => $newRemainingMissing,
+                'resolved'          => $isResolvedNow,
+            ]);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            self::error('Failed to receive missing item: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public static function resolveMissingPurchaseItem(PDO $pdo, array $user, int $missingItemId): never
+    {
+        self::requirePermission($user, 'purchases.manage');
+        $data = self::input();
+        $notes = trim((string) ($data['notes'] ?? 'Resolved with supplier (credited / closed)'));
+
+        $stmt = $pdo->prepare("SELECT * FROM `purchase_missing_items` WHERE `id` = ?");
+        $stmt->execute([$missingItemId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            self::error('Missing order item record not found.', 404);
+        }
+        if ($row['status'] === 'resolved') {
+            self::json(['success' => true, 'message' => 'This missing item is already resolved.']);
+        }
+
+        $combinedNotes = trim(($row['notes'] ? $row['notes'] . ' | ' : '') . "Resolved: {$notes}");
+        $pdo->prepare("
+            UPDATE `purchase_missing_items`
+            SET `status` = 'resolved',
+                `notes` = ?,
+                `resolved_by` = ?,
+                `resolved_at` = NOW()
+            WHERE `id` = ?
+        ")->execute([$combinedNotes, $user['id'], $missingItemId]);
+
+        AuditService::log(
+            $pdo,
+            (int) $user['id'],
+            'purchase.missing_resolved',
+            'Purchase',
+            (int) $row['purchase_id'],
+            ['status' => 'missing', 'missing_quantity' => $row['missing_quantity']],
+            ['status' => 'resolved', 'product_name' => $row['product_name_snapshot']],
+            $notes
+        );
+
+        self::json([
+            'success' => true,
+            'message' => "Missing item '{$row['product_name_snapshot']}' marked as resolved.",
+        ]);
     }
 
     public static function cancelPurchase(PDO $pdo, array $user, int $purchaseId): never
@@ -1265,10 +1830,12 @@ class CatalogInventoryController extends BaseApiController
         self::requirePermission($user, ['inventory.view', 'products.view']);
 
         $productsStmt = $pdo->query("
-            SELECT p.`id`, p.`sku`, p.`barcode`, p.`name`, p.`brand`, p.`model`, p.`unit`,
+            SELECT p.`id`, p.`sku`, p.`barcode`, p.`name`, p.`brand`, p.`model`,
+                   p.`ram_gb`, p.`storage_gb`, p.`box_count`, p.`items_per_box`, p.`unit`,
                    p.`purchase_price`, p.`selling_price`, p.`weighted_avg_cost`,
                    p.`min_stock_level`, p.`image_url`, p.`status`,
                    c.`name` AS category_name,
+                   c.`slug` AS category_slug,
                    COALESCE(i.`available_quantity`, 0) AS available_quantity,
                    COALESCE(i.`reserved_offline_quantity`, 0) AS reserved_offline_quantity,
                    COALESCE(i.`damaged_quantity`, 0) AS damaged_quantity,

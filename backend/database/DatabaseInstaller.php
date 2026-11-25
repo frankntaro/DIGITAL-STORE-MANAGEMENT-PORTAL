@@ -7,7 +7,7 @@ use PDOException;
 
 class DatabaseInstaller
 {
-    private const SCHEMA_VERSION = '2026.11.25.admin-notifications-v1';
+    private const SCHEMA_VERSION = '2026.11.25.product-specs-missing-orders-v1';
     private const PURGE_DEMO_MIGRATION = '2026_11_25_purge_demo_data_v1';
     private static ?array $cachedConfig = null;
     private static bool $dbJustCreated = false;
@@ -453,6 +453,59 @@ class DatabaseInstaller
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ");
 
+            // Ensure product specifications & optional box packaging columns exist
+            $hasRamGb = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'ram_gb'")->fetchAll();
+            if (empty($hasRamGb)) {
+                $pdo->exec("ALTER TABLE `products` ADD COLUMN `ram_gb` VARCHAR(30) NULL AFTER `model`");
+            }
+            $hasStorageGb = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'storage_gb'")->fetchAll();
+            if (empty($hasStorageGb)) {
+                $pdo->exec("ALTER TABLE `products` ADD COLUMN `storage_gb` VARCHAR(30) NULL AFTER `ram_gb`");
+            }
+            $hasBoxCount = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'box_count'")->fetchAll();
+            if (empty($hasBoxCount)) {
+                $pdo->exec("ALTER TABLE `products` ADD COLUMN `box_count` INT UNSIGNED NULL AFTER `storage_gb`");
+            }
+            $hasItemsPerBox = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'items_per_box'")->fetchAll();
+            if (empty($hasItemsPerBox)) {
+                $pdo->exec("ALTER TABLE `products` ADD COLUMN `items_per_box` INT UNSIGNED NULL AFTER `box_count`");
+            }
+
+            // Ensure purchase_missing_items table exists (tracks items missing when ordered stock arrives)
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS `purchase_missing_items` (
+                  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                  `purchase_id` BIGINT UNSIGNED NOT NULL,
+                  `purchase_item_id` BIGINT UNSIGNED NOT NULL,
+                  `supplier_id` BIGINT UNSIGNED NOT NULL,
+                  `product_id` BIGINT UNSIGNED NOT NULL,
+                  `purchase_reference` VARCHAR(50) NOT NULL,
+                  `product_name_snapshot` VARCHAR(180) NOT NULL,
+                  `sku_snapshot` VARCHAR(80) NOT NULL,
+                  `unit_snapshot` VARCHAR(20) NOT NULL DEFAULT 'piece',
+                  `ordered_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                  `received_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                  `missing_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                  `unit_purchase_price` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                  `missing_value` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                  `status` ENUM('missing', 'resolved') NOT NULL DEFAULT 'missing',
+                  `notes` TEXT NULL,
+                  `recorded_by` BIGINT UNSIGNED NOT NULL,
+                  `resolved_by` BIGINT UNSIGNED NULL,
+                  `resolved_at` TIMESTAMP NULL,
+                  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  INDEX `idx_pmi_status` (`status`),
+                  INDEX `idx_pmi_purchase` (`purchase_id`),
+                  INDEX `idx_pmi_supplier` (`supplier_id`),
+                  CONSTRAINT `fk_pmi_purchase` FOREIGN KEY (`purchase_id`) REFERENCES `purchases`(`id`) ON DELETE CASCADE,
+                  CONSTRAINT `fk_pmi_purchase_item` FOREIGN KEY (`purchase_item_id`) REFERENCES `purchase_items`(`id`) ON DELETE CASCADE,
+                  CONSTRAINT `fk_pmi_supplier` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers`(`id`),
+                  CONSTRAINT `fk_pmi_product` FOREIGN KEY (`product_id`) REFERENCES `products`(`id`),
+                  CONSTRAINT `fk_pmi_recorded_by` FOREIGN KEY (`recorded_by`) REFERENCES `users`(`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+
             // Ensure admin notifications table exists (Employee sales, sold-out products & expenses)
             $pdo->exec("
                 CREATE TABLE IF NOT EXISTS `admin_notifications` (
@@ -550,6 +603,7 @@ class DatabaseInstaller
             'sales',
             'customers',
             'supplier_payments',
+            'purchase_missing_items',
             'purchase_items',
             'purchases',
             'suppliers',

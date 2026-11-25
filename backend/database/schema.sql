@@ -136,6 +136,10 @@ CREATE TABLE IF NOT EXISTS `products` (
   `category_id` BIGINT UNSIGNED NOT NULL,
   `brand` VARCHAR(100) NULL,
   `model` VARCHAR(100) NULL,
+  `ram_gb` VARCHAR(30) NULL,
+  `storage_gb` VARCHAR(30) NULL,
+  `box_count` INT UNSIGNED NULL,
+  `items_per_box` INT UNSIGNED NULL,
   `description` TEXT NULL,
   `purchase_price` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
   `selling_price` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
@@ -259,6 +263,39 @@ CREATE TABLE IF NOT EXISTS `purchase_items` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT `fk_pi_purchase` FOREIGN KEY (`purchase_id`) REFERENCES `purchases`(`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_pi_product` FOREIGN KEY (`product_id`) REFERENCES `products`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 15B. PURCHASE MISSING ITEMS (Ordered items that did not arrive during approval)
+CREATE TABLE IF NOT EXISTS `purchase_missing_items` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `purchase_id` BIGINT UNSIGNED NOT NULL,
+  `purchase_item_id` BIGINT UNSIGNED NOT NULL,
+  `supplier_id` BIGINT UNSIGNED NOT NULL,
+  `product_id` BIGINT UNSIGNED NOT NULL,
+  `purchase_reference` VARCHAR(50) NOT NULL,
+  `product_name_snapshot` VARCHAR(180) NOT NULL,
+  `sku_snapshot` VARCHAR(80) NOT NULL,
+  `unit_snapshot` VARCHAR(20) NOT NULL DEFAULT 'piece',
+  `ordered_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `received_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `missing_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `unit_purchase_price` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  `missing_value` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  `status` ENUM('missing', 'resolved') NOT NULL DEFAULT 'missing',
+  `notes` TEXT NULL,
+  `recorded_by` BIGINT UNSIGNED NOT NULL,
+  `resolved_by` BIGINT UNSIGNED NULL,
+  `resolved_at` TIMESTAMP NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_pmi_status` (`status`),
+  INDEX `idx_pmi_purchase` (`purchase_id`),
+  INDEX `idx_pmi_supplier` (`supplier_id`),
+  CONSTRAINT `fk_pmi_purchase` FOREIGN KEY (`purchase_id`) REFERENCES `purchases`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_pmi_purchase_item` FOREIGN KEY (`purchase_item_id`) REFERENCES `purchase_items`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_pmi_supplier` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers`(`id`),
+  CONSTRAINT `fk_pmi_product` FOREIGN KEY (`product_id`) REFERENCES `products`(`id`),
+  CONSTRAINT `fk_pmi_recorded_by` FOREIGN KEY (`recorded_by`) REFERENCES `users`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 16. CASH SESSIONS (Daily Cash Register Shifts)

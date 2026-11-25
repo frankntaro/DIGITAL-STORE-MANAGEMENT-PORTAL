@@ -127,6 +127,15 @@ if ($method === 'POST' && $path === '/supplier-payments') {
 if ($method === 'GET' && $path === '/purchases') {
     CatalogInventoryController::listPurchases($pdo, $user);
 }
+if ($method === 'GET' && $path === '/purchases/missing-items') {
+    CatalogInventoryController::listMissingPurchaseItems($pdo, $user);
+}
+if ($method === 'POST' && preg_match('#^/purchases/missing-items/(\d+)/receive$#', $path, $m)) {
+    CatalogInventoryController::receiveMissingPurchaseItem($pdo, $user, (int) $m[1]);
+}
+if ($method === 'POST' && preg_match('#^/purchases/missing-items/(\d+)/resolve$#', $path, $m)) {
+    CatalogInventoryController::resolveMissingPurchaseItem($pdo, $user, (int) $m[1]);
+}
 if ($method === 'POST' && $path === '/purchases') {
     CatalogInventoryController::createPurchase($pdo, $user);
 }

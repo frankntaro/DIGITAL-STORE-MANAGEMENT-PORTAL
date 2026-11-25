@@ -8,11 +8,15 @@ import {
   CheckCircle2,
   Clock,
   Copy,
+  Download,
   Edit3,
+  FileText,
   FolderKanban,
   Globe,
+  HardDrive,
   Image,
   MessageCircle,
+  Package,
   PackagePlus,
   Plus,
   Printer,
@@ -21,6 +25,7 @@ import {
   Search,
   Share2,
   SlidersHorizontal,
+  Smartphone,
   Trash2,
   Truck,
   UploadCloud,
@@ -38,8 +43,60 @@ import {
   isMeterUnit,
   printHtmlDocument,
 } from '../utils/format';
+import {
+  buildMissingOrderedProductsText,
+  downloadMissingProductsPdf,
+  printMissingProductsPdfReport,
+  shareMissingProductsPdf,
+} from '../utils/pdfGenerator';
 import { useLanguage } from '../utils/i18n';
 import Pagination, { usePagination } from '../components/Pagination';
+
+const RAM_PRESETS = ['2GB', '3GB', '4GB', '6GB', '8GB', '12GB', '16GB'];
+const PHONE_STORAGE_PRESETS = ['32GB', '64GB', '128GB', '256GB', '512GB', '1TB'];
+const MEDIA_STORAGE_PRESETS = ['2GB', '4GB', '8GB', '16GB', '32GB', '64GB', '128GB', '256GB', '512GB', '1TB'];
+
+function ProductSpecBadges({ product, t }) {
+  const hasRam = Boolean(product?.ram_gb);
+  const hasStorage = Boolean(product?.storage_gb);
+  const boxCount = Number(product?.box_count || 0);
+  const itemsPerBox = Number(product?.items_per_box || 0);
+  const hasBoxes = boxCount > 0 || itemsPerBox > 0;
+
+  if (!hasRam && !hasStorage && !hasBoxes) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1 mt-1">
+      {hasRam && hasStorage ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-violet-100 text-violet-800">
+          {product.ram_gb} RAM / {product.storage_gb} ROM
+        </span>
+      ) : (
+        <>
+          {hasRam && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-violet-100 text-violet-800">
+              RAM: {product.ram_gb}
+            </span>
+          )}
+          {hasStorage && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-cyan-100 text-cyan-800">
+              {product.storage_gb}
+            </span>
+          )}
+        </>
+      )}
+      {hasBoxes && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+          {boxCount > 0 && itemsPerBox > 0
+            ? t('{boxes} box × {perBox}/box', { boxes: boxCount, perBox: itemsPerBox })
+            : boxCount > 0
+            ? t('{boxes} boxes', { boxes: boxCount })
+            : t('{perBox} / box', { perBox: itemsPerBox })}
+        </span>
+      )}
+    </div>
+  );
+}
 
 // ============================================================================
 // SCREEN 6: PRODUCTS CATALOGUE & MANAGEMENT
@@ -355,6 +412,7 @@ export function ProductsScreen({
                             <p className="text-[11px] text-slate-500">
                               SKU: {p.sku} {p.brand ? `· ${p.brand}` : ''} {p.model ? p.model : ''}
                             </p>
+                            <ProductSpecBadges product={p} t={t} />
                             {Number(p.total_purchased_qty) > 0 && (
                               <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">
                                 {t('Purchased: +{qty}', { qty: p.total_purchased_qty })}
@@ -534,17 +592,27 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
   const [uploadStatus, setUploadStatus] = useState(null);
   const [selectedFileName, setSelectedFileName] = useState('');
   const [localPreviewUrl, setLocalPreviewUrl] = useState('');
+  const [useBoxPackaging, setUseBoxPackaging] = useState(
+    Boolean(editingProduct?.box_count || editingProduct?.items_per_box)
+  );
   const [form, setForm] = useState({
     name: editingProduct?.name || '',
     category_id: editingProduct?.category_id || defaultCategoryId || '',
     brand: editingProduct?.brand || '',
     model: editingProduct?.model || '',
+    ram_gb: editingProduct?.ram_gb || '',
+    storage_gb: editingProduct?.storage_gb || '',
+    box_count: editingProduct?.box_count ?? '',
+    items_per_box: editingProduct?.items_per_box ?? '',
     sku: editingProduct?.sku || '',
     barcode: editingProduct?.barcode || '',
     purchase_price: editingProduct?.purchase_price || '',
     selling_price: editingProduct?.selling_price || '',
     unit: editingProduct?.unit || 'piece',
-    initial_quantity: editingProduct ? editingProduct.available_quantity : '10',
+    initial_quantity:
+      editingProduct !== null && editingProduct !== undefined
+        ? String(editingProduct.available_quantity ?? 0)
+        : '10',
     min_stock_level: editingProduct?.min_stock_level || '5',
     warranty_months: editingProduct?.warranty_months ?? '12',
     image_url:
@@ -563,12 +631,19 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
       category_id: editingProduct?.category_id || defaultCategoryId || '',
       brand: editingProduct?.brand || '',
       model: editingProduct?.model || '',
+      ram_gb: editingProduct?.ram_gb || '',
+      storage_gb: editingProduct?.storage_gb || '',
+      box_count: editingProduct?.box_count ?? '',
+      items_per_box: editingProduct?.items_per_box ?? '',
       sku: editingProduct?.sku || '',
       barcode: editingProduct?.barcode || '',
       purchase_price: editingProduct?.purchase_price || '',
       selling_price: editingProduct?.selling_price || '',
       unit: editingProduct?.unit || 'piece',
-      initial_quantity: editingProduct ? editingProduct.available_quantity : '10',
+      initial_quantity:
+        editingProduct !== null && editingProduct !== undefined
+          ? String(editingProduct.available_quantity ?? 0)
+          : '10',
       min_stock_level: editingProduct?.min_stock_level || '5',
       warranty_months: editingProduct?.warranty_months ?? '12',
       image_url:
@@ -578,6 +653,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
       status: editingProduct?.status || 'active',
       reason: 'Updated product catalogue details',
     });
+    setUseBoxPackaging(Boolean(editingProduct?.box_count || editingProduct?.items_per_box));
     setLocalPreviewUrl('');
     setSelectedFileName('');
     setUploadStatus(null);
@@ -694,21 +770,64 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
     );
   }
 
+  const selectedCategory =
+    categories.find((c) => String(c.id) === String(form.category_id)) || null;
+  const catSlug = String(selectedCategory?.slug || editingProduct?.category_slug || '').toLowerCase();
+  const catName = String(selectedCategory?.name || editingProduct?.category_name || '').toLowerCase();
+  const isFeaturePhoneCategory =
+    catSlug === 'feature-phones' ||
+    catName.includes('simu ndogo') ||
+    catName.includes('feature phone');
+  const isSmartphoneCategory =
+    !isFeaturePhoneCategory &&
+    (catSlug === 'used-phones' ||
+      catSlug === 'boxed-phones' ||
+      catName.includes('used phone') ||
+      catName.includes('simu used') ||
+      catName.includes('boxed') ||
+      catName.includes('full box') ||
+      catName.includes('smartphone'));
+  const isStorageMediaCategory =
+    catSlug === 'memory-cards-and-flash-drives' ||
+    catName.includes('flash') ||
+    catName.includes('memory card');
+
+  const updateBoxField = (field, rawValue) => {
+    setForm((prev) => {
+      const next = { ...prev, [field]: rawValue };
+      const boxes = Number(next.box_count || 0);
+      const perBox = Number(next.items_per_box || 0);
+      if (boxes > 0 && perBox > 0 && !isMeterUnit(next.unit)) {
+        next.initial_quantity = String(boxes * perBox);
+      }
+      return next;
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (uploadingImage) return;
     setSaving(true);
     setError(null);
+    const includeBoxes = isStorageMediaCategory || useBoxPackaging;
+    const payload = {
+      ...form,
+      available_quantity: form.initial_quantity,
+      ram_gb: isSmartphoneCategory ? form.ram_gb : '',
+      storage_gb: isSmartphoneCategory || isStorageMediaCategory ? form.storage_gb : '',
+      box_count: includeBoxes ? form.box_count : '',
+      items_per_box: includeBoxes ? form.items_per_box : '',
+    };
     try {
       if (editingProduct) {
         await apiRequest(`/products/${editingProduct.id}`, {
           method: 'PUT',
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         });
       } else {
         await apiRequest('/products', {
           method: 'POST',
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         });
       }
       await refreshOfflineBootstrap().catch(() => {});
@@ -945,6 +1064,241 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
             </select>
           </div>
 
+          {/* Dynamic Category Specifications: Smartphones (Used & Full Box) */}
+          {isSmartphoneCategory && (
+            <div className="sm:col-span-2 rounded-2xl border border-violet-200 bg-violet-50/70 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-violet-700" />
+                  <span className="text-xs font-extrabold text-violet-900">
+                    {t('Smartphone Specifications (RAM & ROM / Storage)')}
+                  </span>
+                </div>
+                {(form.ram_gb || form.storage_gb) && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-violet-600 text-white text-[10px] font-extrabold">
+                    {[form.ram_gb ? `${form.ram_gb} RAM` : '', form.storage_gb ? `${form.storage_gb} ROM` : '']
+                      .filter(Boolean)
+                      .join(' / ')}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="prod-ram" className="block text-[11px] font-bold text-violet-900 mb-1">
+                    {t('RAM (GB)')}
+                  </label>
+                  <input
+                    id="prod-ram"
+                    type="text"
+                    value={form.ram_gb}
+                    onChange={(e) => setForm({ ...form, ram_gb: e.target.value })}
+                    placeholder={t('e.g. 4GB, 6GB, 8GB, 12GB')}
+                    className="w-full px-3 py-2 rounded-xl border border-violet-300 bg-white text-xs font-semibold"
+                  />
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {RAM_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setForm({ ...form, ram_gb: preset })}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition ${
+                          String(form.ram_gb).toUpperCase() === preset
+                            ? 'bg-violet-600 text-white border-violet-600'
+                            : 'bg-white text-violet-800 border-violet-200 hover:bg-violet-100'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="prod-phone-storage" className="block text-[11px] font-bold text-violet-900 mb-1">
+                    {t('ROM / Storage (GB)')}
+                  </label>
+                  <input
+                    id="prod-phone-storage"
+                    type="text"
+                    value={form.storage_gb}
+                    onChange={(e) => setForm({ ...form, storage_gb: e.target.value })}
+                    placeholder={t('e.g. 64GB, 128GB, 256GB, 512GB')}
+                    className="w-full px-3 py-2 rounded-xl border border-violet-300 bg-white text-xs font-semibold"
+                  />
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {PHONE_STORAGE_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setForm({ ...form, storage_gb: preset })}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition ${
+                          String(form.storage_gb).toUpperCase() === preset
+                            ? 'bg-violet-600 text-white border-violet-600'
+                            : 'bg-white text-violet-800 border-violet-200 hover:bg-violet-100'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Dynamic Category Specifications: Memory Cards & Flash Drives */}
+          {isStorageMediaCategory && (
+            <div className="sm:col-span-2 rounded-2xl border border-cyan-200 bg-cyan-50/70 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-cyan-700" />
+                  <span className="text-xs font-extrabold text-cyan-900">
+                    {t('Flash Drive & Memory Card Specifications (Boxes & Storage GB)')}
+                  </span>
+                </div>
+                {Number(form.box_count || 0) > 0 && Number(form.items_per_box || 0) > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-cyan-700 text-white text-[10px] font-extrabold">
+                    {t('{boxes} box × {perBox} = {total} pcs', {
+                      boxes: Number(form.box_count),
+                      perBox: Number(form.items_per_box),
+                      total: Number(form.box_count) * Number(form.items_per_box),
+                    })}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label htmlFor="prod-media-storage" className="block text-[11px] font-bold text-cyan-900 mb-1">
+                    {t('Device Storage (GB)')}
+                  </label>
+                  <input
+                    id="prod-media-storage"
+                    type="text"
+                    value={form.storage_gb}
+                    onChange={(e) => setForm({ ...form, storage_gb: e.target.value })}
+                    placeholder={t('e.g. 16GB, 32GB, 64GB, 128GB')}
+                    className="w-full px-3 py-2 rounded-xl border border-cyan-300 bg-white text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="prod-media-boxes" className="block text-[11px] font-bold text-cyan-900 mb-1">
+                    {t('Number of Boxes')}
+                  </label>
+                  <input
+                    id="prod-media-boxes"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={form.box_count}
+                    onChange={(e) => updateBoxField('box_count', e.target.value)}
+                    placeholder={t('e.g. 5')}
+                    className="w-full px-3 py-2 rounded-xl border border-cyan-300 bg-white text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="prod-media-per-box" className="block text-[11px] font-bold text-cyan-900 mb-1">
+                    {t('Flash / Memory Cards per Box')}
+                  </label>
+                  <input
+                    id="prod-media-per-box"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={form.items_per_box}
+                    onChange={(e) => updateBoxField('items_per_box', e.target.value)}
+                    placeholder={t('e.g. 20')}
+                    className="w-full px-3 py-2 rounded-xl border border-cyan-300 bg-white text-xs font-semibold"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {MEDIA_STORAGE_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setForm({ ...form, storage_gb: preset })}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition ${
+                      String(form.storage_gb).toUpperCase() === preset
+                        ? 'bg-cyan-700 text-white border-cyan-700'
+                        : 'bg-white text-cyan-900 border-cyan-200 hover:bg-cyan-100'
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-cyan-800">
+                {t('Tip: Entering Number of Boxes and items per box automatically calculates the total stock quantity below (you can still adjust stock manually).')}
+              </p>
+            </div>
+          )}
+
+          {/* Optional Box Packaging for ANY Other Product */}
+          {!isStorageMediaCategory && (
+            <div className="sm:col-span-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={useBoxPackaging}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUseBoxPackaging(checked);
+                      if (!checked) {
+                        setForm((prev) => ({ ...prev, box_count: '', items_per_box: '' }));
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <Package className="w-4 h-4 text-amber-600" />
+                  <span>{t('This product is packaged in boxes (Optional)')}</span>
+                </label>
+                {useBoxPackaging && Number(form.box_count || 0) > 0 && Number(form.items_per_box || 0) > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-600 text-white text-[10px] font-extrabold">
+                    {t('{boxes} box × {perBox} = {total} pcs', {
+                      boxes: Number(form.box_count),
+                      perBox: Number(form.items_per_box),
+                      total: Number(form.box_count) * Number(form.items_per_box),
+                    })}
+                  </span>
+                )}
+              </div>
+              {useBoxPackaging && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label htmlFor="prod-opt-boxes" className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {t('Number of Boxes (Optional)')}
+                    </label>
+                    <input
+                      id="prod-opt-boxes"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={form.box_count}
+                      onChange={(e) => updateBoxField('box_count', e.target.value)}
+                      placeholder={t('e.g. 4')}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="prod-opt-per-box" className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {t('Items per Box (Optional)')}
+                    </label>
+                    <input
+                      id="prod-opt-per-box"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={form.items_per_box}
+                      onChange={(e) => updateBoxField('items_per_box', e.target.value)}
+                      placeholder={t('e.g. 12')}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label htmlFor="prod-sku" className="block text-xs font-bold text-slate-700 mb-1">
               {t('SKU Code (Auto-generated if blank)')}
@@ -1020,22 +1374,35 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
             />
           </div>
 
-          {!editingProduct && (
-            <div>
-              <label htmlFor="prod-init-qty" className="block text-xs font-bold text-slate-700 mb-1">
-                {isMeterUnit(form.unit) ? t('Opening Stock (Meters)') : t('Opening Stock Quantity')}
-              </label>
-              <input
-                id="prod-init-qty"
-                type="number"
-                min="0"
-                step={isMeterUnit(form.unit) ? '0.01' : '1'}
-                value={form.initial_quantity}
-                onChange={(e) => setForm({ ...form, initial_quantity: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs"
-              />
-            </div>
-          )}
+          <div>
+            <label htmlFor="prod-init-qty" className="block text-xs font-bold text-slate-700 mb-1">
+              {editingProduct
+                ? isMeterUnit(form.unit)
+                  ? t('Current Stock Quantity (Meters)')
+                  : t('Current Stock Quantity')
+                : isMeterUnit(form.unit)
+                ? t('Opening Stock (Meters)')
+                : t('Opening Stock Quantity')}
+            </label>
+            <input
+              id="prod-init-qty"
+              type="number"
+              min="0"
+              step={isMeterUnit(form.unit) ? '0.01' : '1'}
+              value={form.initial_quantity}
+              onChange={(e) => setForm({ ...form, initial_quantity: e.target.value })}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold"
+            />
+            {editingProduct &&
+              Math.abs(Number(form.initial_quantity || 0) - Number(editingProduct.available_quantity || 0)) > 0.001 && (
+                <p className="text-[10px] font-bold text-blue-700 mt-1">
+                  {t('Stock will update: {from} → {to} (recorded in Stock Movements)', {
+                    from: formatQtyWithUnit(editingProduct.available_quantity, form.unit),
+                    to: formatQtyWithUnit(form.initial_quantity || 0, form.unit),
+                  })}
+                </p>
+              )}
+          </div>
 
           <div>
             <label htmlFor="prod-min-stock" className="block text-xs font-bold text-slate-700 mb-1">
@@ -1894,12 +2261,57 @@ export function ApproveOrdersScreen({
 }) {
   const { t } = useLanguage();
   const [purchases, setPurchases] = useState([]);
+  const [missingItems, setMissingItems] = useState([]);
+  const [missingSummary, setMissingSummary] = useState({
+    unresolved_items_count: 0,
+    unresolved_units_total: 0,
+    unresolved_value_total: 0,
+    filtered_items_count: 0,
+    filtered_units_total: 0,
+    filtered_value_total: 0,
+  });
+  const [missingSuppliers, setMissingSuppliers] = useState([]);
+  const [shopSettings, setShopSettings] = useState({});
+  const [missingStatusFilter, setMissingStatusFilter] = useState('missing');
+  const [missingSupplierFilter, setMissingSupplierFilter] = useState('');
+  const [missingSearch, setMissingSearch] = useState('');
   const [tab, setTab] = useState('pending');
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const [approvalDrafts, setApprovalDrafts] = useState({});
+  const [receivingItem, setReceivingItem] = useState(null);
+  const [receiveQtyInput, setReceiveQtyInput] = useState('');
+  const [receiveNotesInput, setReceiveNotesInput] = useState('');
   const canManagePurchases = !user || hasPermission(user, 'purchases.manage');
+
+  const loadMissingItems = async (
+    nextStatus = missingStatusFilter,
+    nextSupplierId = missingSupplierFilter
+  ) => {
+    if (!canManagePurchases) return;
+    try {
+      const params = new URLSearchParams();
+      params.set('status', nextStatus || 'missing');
+      if (nextSupplierId) params.set('supplier_id', nextSupplierId);
+      const res = await apiRequest(`/purchases/missing-items?${params.toString()}`);
+      setMissingItems(res.missing_items || []);
+      setMissingSummary(
+        res.summary || {
+          unresolved_items_count: 0,
+          unresolved_units_total: 0,
+          unresolved_value_total: 0,
+          filtered_items_count: 0,
+          filtered_units_total: 0,
+          filtered_value_total: 0,
+        }
+      );
+      setMissingSuppliers(res.suppliers || []);
+      if (res.shop_settings) setShopSettings(res.shop_settings);
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message });
+    }
+  };
 
   const loadOrders = async () => {
     if (!canManagePurchases) {
@@ -1908,7 +2320,10 @@ export function ApproveOrdersScreen({
     }
     setLoading(true);
     try {
-      const res = await apiRequest('/purchases');
+      const [res] = await Promise.all([
+        apiRequest('/purchases'),
+        loadMissingItems(missingStatusFilter, missingSupplierFilter),
+      ]);
       const list = res.purchases || [];
       setPurchases(list);
 
@@ -1939,10 +2354,34 @@ export function ApproveOrdersScreen({
     loadOrders();
   }, [canManagePurchases]);
 
+  useEffect(() => {
+    if (canManagePurchases) {
+      loadMissingItems(missingStatusFilter, missingSupplierFilter);
+    }
+  }, [missingStatusFilter, missingSupplierFilter]);
+
   const pendingOrders = purchases.filter((p) => p.status === 'pending' || p.status === 'draft');
-  const approvedOrders = purchases.filter((p) => p.status === 'received' || p.status === 'partially_received');
+  const approvedOrders = purchases.filter(
+    (p) => p.status === 'received' || p.status === 'partially_received'
+  );
+  const filteredMissingItems = missingItems.filter((item) => {
+    if (!missingSearch.trim()) return true;
+    const q = missingSearch.trim().toLowerCase();
+    return (
+      String(item.product_name_snapshot || '').toLowerCase().includes(q) ||
+      String(item.sku_snapshot || '').toLowerCase().includes(q) ||
+      String(item.purchase_reference || '').toLowerCase().includes(q) ||
+      String(item.supplier_name || '').toLowerCase().includes(q)
+    );
+  });
+
   const pendingPg = usePagination(pendingOrders, 5);
   const approvedPg = usePagination(approvedOrders, 5);
+  const missingPg = usePagination(
+    filteredMissingItems,
+    5,
+    `${missingStatusFilter}|${missingSupplierFilter}|${missingSearch}`
+  );
 
   if (!canManagePurchases) {
     return (
@@ -1990,6 +2429,88 @@ export function ApproveOrdersScreen({
     }));
   };
 
+  const buildFilterLabel = () => {
+    const statusText =
+      missingStatusFilter === 'missing'
+        ? t('Missing Only')
+        : missingStatusFilter === 'resolved'
+        ? t('Resolved Only')
+        : t('All Statuses');
+    const supObj = missingSuppliers.find((s) => String(s.id) === String(missingSupplierFilter));
+    return supObj ? `${statusText} · ${supObj.name}` : statusText;
+  };
+
+  const handleDownloadMissingPdf = (itemsList = filteredMissingItems, orderRef = '') => {
+    if (!itemsList.length) {
+      setFeedback({ type: 'error', text: 'There are no missing ordered products to export.' });
+      return;
+    }
+    const { filename } = downloadMissingProductsPdf({
+      items: itemsList,
+      shopSettings,
+      filterLabel: orderRef ? t('Order {ref}', { ref: orderRef }) : buildFilterLabel(),
+      orderRef,
+      t,
+    });
+    setFeedback({
+      type: 'success',
+      text: t('PDF downloaded successfully: {file}', { file: filename }),
+    });
+  };
+
+  const handleShareMissingPdf = async (itemsList = filteredMissingItems, orderRef = '') => {
+    if (!itemsList.length) {
+      setFeedback({ type: 'error', text: 'There are no missing ordered products to share.' });
+      return;
+    }
+    const result = await shareMissingProductsPdf({
+      items: itemsList,
+      shopSettings,
+      filterLabel: orderRef ? t('Order {ref}', { ref: orderRef }) : buildFilterLabel(),
+      orderRef,
+      t,
+    });
+    if (result.status === 'shared') {
+      setFeedback({
+        type: 'success',
+        text: t('Missing products PDF shared successfully!'),
+      });
+    } else if (result.status === 'downloaded_fallback') {
+      setFeedback({
+        type: 'success',
+        text: t('PDF downloaded ({file}) and summary copied. Attach the downloaded PDF to WhatsApp or Email to share.', {
+          file: result.filename,
+        }),
+        whatsappText: result.summaryText,
+      });
+    }
+  };
+
+  const handlePrintMissingPdf = (itemsList = filteredMissingItems, orderRef = '') => {
+    if (!itemsList.length) {
+      setFeedback({ type: 'error', text: 'There are no missing ordered products to export.' });
+      return;
+    }
+    printMissingProductsPdfReport({
+      items: itemsList,
+      shopSettings,
+      filterLabel: orderRef ? t('Order {ref}', { ref: orderRef }) : buildFilterLabel(),
+      orderRef,
+      t,
+    });
+  };
+
+  const handleWhatsAppMissing = (itemsList = filteredMissingItems) => {
+    if (!itemsList.length) return;
+    const text = buildMissingOrderedProductsText({
+      items: itemsList,
+      shopSettings,
+      filterLabel: buildFilterLabel(),
+      t,
+    });
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
   const handleApproveOrder = async (order) => {
     setProcessingId(order.id);
     setFeedback(null);
@@ -2013,10 +2534,22 @@ export function ApproveOrdersScreen({
         }),
       });
       await refreshOfflineBootstrap().catch(() => {});
+      const recordedMissing = (res.missing_items || []).map((mi) => ({
+        ...mi,
+        product_name_snapshot: mi.product_name,
+        sku_snapshot: mi.sku,
+        unit_snapshot: mi.unit,
+        supplier_name: order.supplier_name,
+        supplier_phone: order.supplier_phone,
+        purchase_date: order.purchase_date,
+        status: 'missing',
+      }));
       setFeedback({
         type: 'success',
         text: res.message,
         updates: res.stock_updates || [],
+        missingItems: recordedMissing,
+        orderRef: order.reference_number,
       });
       await loadOrders();
       onOrdersUpdated?.();
@@ -2045,13 +2578,64 @@ export function ApproveOrdersScreen({
     }
   };
 
+  const handleOpenReceiveMissing = (item) => {
+    setReceivingItem(item);
+    setReceiveQtyInput(String(item.missing_quantity || ''));
+    setReceiveNotesInput('');
+  };
+
+  const handleConfirmReceiveMissing = async (e) => {
+    e.preventDefault();
+    if (!receivingItem) return;
+    setProcessingId(`miss-${receivingItem.id}`);
+    setFeedback(null);
+    try {
+      const res = await apiRequest(`/purchases/missing-items/${receivingItem.id}/receive`, {
+        method: 'POST',
+        body: JSON.stringify({
+          quantity: Number(receiveQtyInput),
+          notes: receiveNotesInput,
+        }),
+      });
+      await refreshOfflineBootstrap().catch(() => {});
+      setReceivingItem(null);
+      setFeedback({ type: 'success', text: res.message });
+      await loadOrders();
+      onOrdersUpdated?.();
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message });
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleResolveMissing = async (item) => {
+    setProcessingId(`res-${item.id}`);
+    setFeedback(null);
+    try {
+      const res = await apiRequest(`/purchases/missing-items/${item.id}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ notes: 'Marked resolved by Admin' }),
+      });
+      setFeedback({ type: 'success', text: res.message });
+      await loadOrders();
+      onOrdersUpdated?.();
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message });
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const unresolvedMissingCount = Number(missingSummary?.unresolved_items_count || 0);
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-extrabold text-slate-900">{t('Approve Supplier Orders')}</h1>
           <p className="text-xs text-slate-500">
-            {t('Review pending stock orders once delivered and approve them to automatically update stock across the entire app')}
+            {t('Review pending stock orders once delivered, approve arrived quantities, and track or export missing ordered products as PDF')}
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -2076,15 +2660,26 @@ export function ApproveOrdersScreen({
 
       {feedback && (
         <div
-          className={`p-4 rounded-2xl border text-xs font-semibold space-y-2 ${
+          className={`p-4 rounded-2xl border text-xs font-semibold space-y-2.5 ${
             feedback.type === 'error'
               ? 'bg-red-50 border-red-200 text-red-700'
               : 'bg-emerald-50 border-emerald-200 text-emerald-900'
           }`}
         >
-          <p>{t(feedback.text)}</p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p>{t(feedback.text)}</p>
+            <button
+              type="button"
+              onClick={() => setFeedback(null)}
+              className="text-slate-500 hover:text-slate-800"
+              aria-label={t('Dismiss')}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
           {Array.isArray(feedback.updates) && feedback.updates.length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-1">
+            <div className="flex flex-wrap gap-2 pt-0.5">
               {feedback.updates.map((u) => (
                 <span
                   key={u.product_id}
@@ -2095,11 +2690,71 @@ export function ApproveOrdersScreen({
               ))}
             </div>
           )}
+
+          {Array.isArray(feedback.missingItems) && feedback.missingItems.length > 0 && (
+            <div className="pt-2 border-t border-emerald-200 space-y-2">
+              <p className="text-[11px] font-extrabold text-red-700">
+                {t('Moved to Missing Ordered Products:')}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {feedback.missingItems.map((mi) => (
+                  <span
+                    key={mi.id || mi.product_id}
+                    className="px-2.5 py-1 rounded-lg bg-red-50 border border-red-200 text-[11px] font-bold text-red-700"
+                  >
+                    {mi.product_name_snapshot || mi.product_name}: -{mi.missing_quantity}{' '}
+                    ({formatTZS(mi.missing_value)})
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setTab('missing')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" /> {t('View Missing Products')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadMissingPdf(feedback.missingItems, feedback.orderRef || '')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold"
+                >
+                  <Download className="w-3.5 h-3.5" /> {t('Download PDF')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleShareMissingPdf(feedback.missingItems, feedback.orderRef || '')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold"
+                >
+                  <Share2 className="w-3.5 h-3.5" /> {t('Share PDF')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {feedback.whatsappText && (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() =>
+                  window.open(
+                    `https://wa.me/?text=${encodeURIComponent(feedback.whatsappText)}`,
+                    '_blank',
+                    'noopener,noreferrer'
+                  )
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold"
+              >
+                <MessageCircle className="w-3.5 h-3.5" /> {t('Open WhatsApp')}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Pending vs Approved History Tabs */}
-      <div className="flex gap-2 border-b border-slate-200">
+      {/* Pending vs Missing Ordered Products vs Approved History Tabs */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200">
         <button
           type="button"
           onClick={() => setTab('pending')}
@@ -2108,6 +2763,22 @@ export function ApproveOrdersScreen({
           }`}
         >
           {t('Pending Orders ({count})', { count: pendingOrders.length })}
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('missing')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition ${
+            tab === 'missing' ? 'border-red-600 text-red-700' : 'border-transparent text-slate-500'
+          }`}
+        >
+          <span>{t('Missing Ordered Products')}</span>
+          <span
+            className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+              unresolvedMissingCount > 0 ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-600'
+            }`}
+          >
+            {unresolvedMissingCount}
+          </span>
         </button>
         <button
           type="button"
@@ -2144,6 +2815,21 @@ export function ApproveOrdersScreen({
               }, 0);
               const computedTotal = computedSubtotal + Number(order.additional_costs || 0);
 
+              let orderMissingLines = 0;
+              let orderMissingUnits = 0;
+              (order.items || []).forEach((it) => {
+                const ordered = Number(it.ordered_quantity || 0);
+                const arrived =
+                  draft.itemQtys && draft.itemQtys[it.id] !== undefined
+                    ? Number(draft.itemQtys[it.id])
+                    : ordered;
+                const miss = Math.max(0, Math.round((ordered - arrived) * 100) / 100);
+                if (miss > 0) {
+                  orderMissingLines += 1;
+                  orderMissingUnits += miss;
+                }
+              });
+
               return (
                 <div
                   key={order.id}
@@ -2159,6 +2845,11 @@ export function ApproveOrdersScreen({
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-white uppercase">
                           {t('Pending Approval')}
                         </span>
+                        {orderMissingLines > 0 && (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-red-600 text-white">
+                            {t('{units} Missing', { units: formatQtyNumber(orderMissingUnits) })}
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-600 mt-0.5">
                         {t('Supplier:')} <strong>{order.supplier_name}</strong>
@@ -2171,7 +2862,7 @@ export function ApproveOrdersScreen({
                       )}
                     </div>
                     <div className="text-right">
-                      <p className="text-[11px] text-slate-500 font-semibold">{t('Total Payable')}</p>
+                      <p className="text-[11px] text-slate-500 font-semibold">{t('Total Payable (Arrived)')}</p>
                       <p className="text-lg font-extrabold text-blue-700">{formatTZS(computedTotal)}</p>
                     </div>
                   </div>
@@ -2185,19 +2876,25 @@ export function ApproveOrdersScreen({
                           <th className="py-2.5 px-3 text-center font-bold">{t('Current Stock')}</th>
                           <th className="py-2.5 px-3 text-center font-bold">{t('Ordered Qty')}</th>
                           <th className="py-2.5 px-3 text-center font-bold">{t('Arrived Qty')}</th>
+                          <th className="py-2.5 px-3 text-center font-bold">{t('Missing Qty')}</th>
                           <th className="py-2.5 px-3 text-center font-bold">{t('New Stock After Approval')}</th>
                           <th className="py-2.5 px-4 text-right font-bold">{t('Line Total')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {(order.items || []).map((it) => {
+                          const orderedQty = Number(it.ordered_quantity || 0);
                           const arrivedQty =
                             draft.itemQtys && draft.itemQtys[it.id] !== undefined
                               ? Number(draft.itemQtys[it.id])
-                              : Number(it.ordered_quantity);
+                              : orderedQty;
+                          const missingQty = Math.max(
+                            0,
+                            Math.round((orderedQty - arrivedQty) * 100) / 100
+                          );
                           const currentStock = Number(it.current_stock || 0);
                           return (
-                            <tr key={it.id}>
+                            <tr key={it.id} className={missingQty > 0 ? 'bg-red-50/40' : ''}>
                               <td className="py-3 px-4">
                                 <p className="font-bold text-slate-900">{it.product_name}</p>
                                 <p className="text-[10px] text-slate-400">
@@ -2208,17 +2905,33 @@ export function ApproveOrdersScreen({
                                 {currentStock}
                               </td>
                               <td className="py-3 px-3 text-center font-bold text-slate-900">
-                                {it.ordered_quantity}
+                                {orderedQty}
                               </td>
                               <td className="py-3 px-3 text-center">
                                 <input
                                   type="number"
                                   min="0"
+                                  step={isMeterUnit(it.unit) ? '0.01' : '1'}
                                   aria-label={t('Arrived Qty')}
                                   value={arrivedQty}
                                   onChange={(e) => updateDraftItemQty(order.id, it.id, e.target.value)}
-                                  className="w-20 px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-extrabold text-center"
+                                  className={`w-20 px-2.5 py-1.5 rounded-lg border text-xs font-extrabold text-center ${
+                                    missingQty > 0
+                                      ? 'border-red-400 bg-white text-red-700'
+                                      : 'border-slate-300 text-slate-900'
+                                  }`}
                                 />
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                {missingQty > 0 ? (
+                                  <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-700 font-extrabold">
+                                    -{formatQtyNumber(missingQty)}
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold">
+                                    0
+                                  </span>
+                                )}
                               </td>
                               <td className="py-3 px-3 text-center">
                                 <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-extrabold">
@@ -2234,6 +2947,18 @@ export function ApproveOrdersScreen({
                       </tbody>
                     </table>
                   </div>
+
+                  {orderMissingLines > 0 && (
+                    <div className="px-4 py-2.5 bg-red-50 border-t border-red-200 flex items-center gap-2 text-[11px] font-bold text-red-800">
+                      <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                      <span>
+                        {t(
+                          'Partial delivery detected: {units} unit(s) across {lines} product(s) did not arrive and will automatically move to Missing Ordered Products after approval.',
+                          { units: formatQtyNumber(orderMissingUnits), lines: orderMissingLines }
+                        )}
+                      </span>
+                    </div>
+                  )}
 
                   {/* Delivery Payment & Approve Action Row */}
                   <div className="p-4 bg-slate-50/70 border-t border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
@@ -2273,7 +2998,7 @@ export function ApproveOrdersScreen({
                         type="text"
                         value={draft.approval_notes || ''}
                         onChange={(e) => updateDraftField(order.id, 'approval_notes', e.target.value)}
-                        placeholder={t('e.g. Stock verified & received')}
+                        placeholder={t('e.g. Some items missing from delivery')}
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white"
                       />
                     </div>
@@ -2295,6 +3020,8 @@ export function ApproveOrdersScreen({
                         <CheckCircle2 className="w-4 h-4" />
                         {processingId === order.id
                           ? t('Approving...')
+                          : orderMissingLines > 0
+                          ? t('Approve Arrived & Log Missing')
                           : t('Approve & Update Stock')}
                       </button>
                     </div>
@@ -2305,6 +3032,330 @@ export function ApproveOrdersScreen({
             <Pagination {...pendingPg.paginationProps} standalone />
           </div>
         )
+      ) : tab === 'missing' ? (
+        <div className="space-y-4">
+          {/* Missing Ordered Products KPI Strip */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-4">
+              <p className="text-xs text-slate-500">{t('Unresolved Missing Lines')}</p>
+              <p className="text-xl font-extrabold text-slate-900 mt-1">
+                {missingSummary.unresolved_items_count || 0}
+              </p>
+            </div>
+            <div className="bg-white rounded-2xl border border-amber-200 p-4">
+              <p className="text-xs text-amber-700 font-semibold">{t('Total Missing Units')}</p>
+              <p className="text-xl font-extrabold text-amber-700 mt-1">
+                {formatQtyNumber(missingSummary.unresolved_units_total || 0)}
+              </p>
+            </div>
+            <div className="bg-white rounded-2xl border border-red-200 p-4">
+              <p className="text-xs text-red-700 font-semibold">{t('Total Missing Value (TZS)')}</p>
+              <p className="text-xl font-extrabold text-red-700 mt-1">
+                {formatTZS(missingSummary.unresolved_value_total || 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* Filter & PDF Export / Download / Share Toolbar */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
+              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="search"
+                  value={missingSearch}
+                  onChange={(e) => setMissingSearch(e.target.value)}
+                  placeholder={t('Search product, order ref, supplier...')}
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+              <select
+                aria-label={t('Filter missing status')}
+                value={missingStatusFilter}
+                onChange={(e) => setMissingStatusFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white font-semibold"
+              >
+                <option value="missing">{t('Missing Only')}</option>
+                <option value="resolved">{t('Resolved Only')}</option>
+                <option value="all">{t('All Statuses')}</option>
+              </select>
+              <select
+                aria-label={t('Filter by supplier')}
+                value={missingSupplierFilter}
+                onChange={(e) => setMissingSupplierFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white font-semibold"
+              >
+                <option value="">{t('All Suppliers')}</option>
+                {missingSuppliers.map((sup) => (
+                  <option key={sup.id} value={sup.id}>
+                    {sup.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={filteredMissingItems.length === 0}
+                onClick={() => handleDownloadMissingPdf(filteredMissingItems)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" /> {t('Download PDF')}
+              </button>
+              <button
+                type="button"
+                disabled={filteredMissingItems.length === 0}
+                onClick={() => handleShareMissingPdf(filteredMissingItems)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm"
+              >
+                <Share2 className="w-3.5 h-3.5" /> {t('Share PDF')}
+              </button>
+              <button
+                type="button"
+                disabled={filteredMissingItems.length === 0}
+                onClick={() => handlePrintMissingPdf(filteredMissingItems)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 text-xs font-bold"
+              >
+                <Printer className="w-3.5 h-3.5" /> {t('Export / Print PDF')}
+              </button>
+              <button
+                type="button"
+                disabled={filteredMissingItems.length === 0}
+                onClick={() => handleWhatsAppMissing(filteredMissingItems)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm"
+              >
+                <MessageCircle className="w-3.5 h-3.5" /> {t('WhatsApp')}
+              </button>
+            </div>
+          </div>
+
+          {/* Missing Ordered Products Table */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="table-region" role="region" aria-label={t('Missing ordered products')}>
+              <table className="text-xs">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                    <th className="py-3 px-4 text-left font-bold">{t('Order / Date')}</th>
+                    <th className="py-3 px-4 text-left font-bold">{t('Supplier')}</th>
+                    <th className="py-3 px-4 text-left font-bold">{t('Product & SKU')}</th>
+                    <th className="py-3 px-3 text-center font-bold">{t('Ordered')}</th>
+                    <th className="py-3 px-3 text-center font-bold">{t('Arrived')}</th>
+                    <th className="py-3 px-3 text-center font-bold">{t('Missing')}</th>
+                    <th className="py-3 px-4 text-right font-bold">{t('Missing Value')}</th>
+                    <th className="py-3 px-3 text-center font-bold">{t('Status')}</th>
+                    <th className="py-3 px-4 text-center font-bold">{t('Actions')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredMissingItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-10 text-center text-slate-400">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+                        <p className="font-bold text-slate-600">
+                          {t('No missing ordered products recorded for this filter.')}
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    missingPg.pageItems.map((mi) => {
+                      const unit = mi.unit_snapshot || 'piece';
+                      const isResolved = mi.status === 'resolved';
+                      const sameOrderItems = missingItems.filter(
+                        (x) => String(x.purchase_id) === String(mi.purchase_id)
+                      );
+                      return (
+                        <tr key={mi.id} className="hover:bg-slate-50">
+                          <td className="py-3 px-4">
+                            <p className="font-extrabold text-blue-700">{mi.purchase_reference}</p>
+                            <p className="text-[10px] text-slate-400">
+                              {formatDate(mi.purchase_date || mi.created_at)}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="font-bold text-slate-900">{mi.supplier_name}</p>
+                            {mi.supplier_phone && (
+                              <p className="text-[10px] text-slate-500">{mi.supplier_phone}</p>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="font-bold text-slate-900">{mi.product_name_snapshot}</p>
+                            <p className="text-[10px] text-slate-500">
+                              SKU: {mi.sku_snapshot} · {formatTZS(mi.unit_purchase_price)} / {t('unit')}
+                            </p>
+                            {mi.notes && (
+                              <p className="text-[10px] text-slate-500 italic mt-0.5">{mi.notes}</p>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold text-slate-700">
+                            {formatQtyWithUnit(mi.ordered_quantity, unit)}
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold text-emerald-700">
+                            {formatQtyWithUnit(mi.received_quantity, unit)}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full font-extrabold ${
+                                isResolved
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-red-100 text-red-700'
+                              }`}
+                            >
+                              {formatQtyWithUnit(mi.missing_quantity, unit)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-extrabold text-red-700">
+                            {formatTZS(mi.missing_value)}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                isResolved
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-red-100 text-red-700'
+                              }`}
+                            >
+                              {isResolved ? t('Resolved') : t('Missing')}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <div className="inline-flex items-center gap-1">
+                              {!isResolved && (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={processingId === `miss-${mi.id}`}
+                                    onClick={() => handleOpenReceiveMissing(mi)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold"
+                                    title={t('Receive Missing Stock')}
+                                  >
+                                    <PackagePlus className="w-3 h-3" /> {t('Receive')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={processingId === `res-${mi.id}`}
+                                    onClick={() => handleResolveMissing(mi)}
+                                    className="px-2 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-bold"
+                                    title={t('Mark as Resolved')}
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleDownloadMissingPdf(sameOrderItems, mi.purchase_reference)
+                                }
+                                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+                                title={t('Download Order Missing PDF')}
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleShareMissingPdf(sameOrderItems, mi.purchase_reference)
+                                }
+                                className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700"
+                                title={t('Share Order Missing PDF')}
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...missingPg.paginationProps} />
+          </div>
+
+          {/* Receive Missing Stock Modal */}
+          {receivingItem && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+              <form
+                onSubmit={handleConfirmReceiveMissing}
+                className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-5 space-y-4"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">
+                      {t('Receive Missing Ordered Stock')}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {receivingItem.product_name_snapshot} · {receivingItem.purchase_reference}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReceivingItem(null)}
+                    className="p-1 text-slate-400 hover:text-slate-700"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex justify-between">
+                  <span className="text-slate-600">{t('Currently Missing:')}</span>
+                  <strong className="text-red-700">
+                    {formatQtyWithUnit(receivingItem.missing_quantity, receivingItem.unit_snapshot)}
+                  </strong>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {t('Quantity Arrived Now')}
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0.01"
+                    max={Number(receivingItem.missing_quantity)}
+                    step={isMeterUnit(receivingItem.unit_snapshot) ? '0.01' : '1'}
+                    value={receiveQtyInput}
+                    onChange={(e) => setReceiveQtyInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-extrabold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {t('Delivery Notes (Optional)')}
+                  </label>
+                  <input
+                    type="text"
+                    value={receiveNotesInput}
+                    onChange={(e) => setReceiveNotesInput(e.target.value)}
+                    placeholder={t('e.g. Supplier delivered remaining balance')}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setReceivingItem(null)}
+                    className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700"
+                  >
+                    {t('Cancel')}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={processingId === `miss-${receivingItem.id}`}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    {t('Confirm & Add to Stock')}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="table-region" role="region" aria-label={t('Approved orders history')}>
@@ -2314,30 +3365,63 @@ export function ApproveOrdersScreen({
                   <th className="py-3 px-4 text-left font-bold">{t('Ref #')}</th>
                   <th className="py-3 px-4 text-left font-bold">{t('Supplier')}</th>
                   <th className="py-3 px-4 text-left font-bold">{t('Approved Items')}</th>
+                  <th className="py-3 px-4 text-center font-bold">{t('Delivery Status')}</th>
                   <th className="py-3 px-4 text-right font-bold">{t('Total (TZS)')}</th>
                   <th className="py-3 px-4 text-left font-bold">{t('Approved By')}</th>
                   <th className="py-3 px-4 text-left font-bold">{t('Approved Date')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {approvedPg.pageItems.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="py-3 px-4 font-extrabold text-emerald-700">{p.reference_number}</td>
-                    <td className="py-3 px-4 font-bold text-slate-900">{p.supplier_name}</td>
-                    <td className="py-3 px-4 text-slate-600">
-                      {(p.items || []).map((i) => `${i.product_name} (+${i.received_quantity})`).join(', ')}
-                    </td>
-                    <td className="py-3 px-4 text-right font-extrabold text-slate-900">
-                      {formatTZS(p.total_amount)}
-                    </td>
-                    <td className="py-3 px-4 text-slate-700">
-                      {p.approved_by_name || p.recorded_by_name || '—'}
-                    </td>
-                    <td className="py-3 px-4 text-slate-500">
-                      {formatDate(p.approved_at || p.received_at || p.purchase_date, true)}
-                    </td>
-                  </tr>
-                ))}
+                {approvedPg.pageItems.map((p) => {
+                  const hasMissing = Number(p.unresolved_missing_count || 0) > 0;
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 font-extrabold text-emerald-700">{p.reference_number}</td>
+                      <td className="py-3 px-4 font-bold text-slate-900">{p.supplier_name}</td>
+                      <td className="py-3 px-4 text-slate-600">
+                        {(p.items || [])
+                          .map((i) => {
+                            const miss = Number(i.missing_quantity || 0);
+                            return miss > 0
+                              ? `${i.product_name} (+${i.received_quantity}, -${miss} ${t('missing')})`
+                              : `${i.product_name} (+${i.received_quantity})`;
+                          })
+                          .join(', ')}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <div className="inline-flex flex-col items-center gap-1">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                              p.status === 'partially_received'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            {t(p.status)}
+                          </span>
+                          {hasMissing && (
+                            <button
+                              type="button"
+                              onClick={() => setTab('missing')}
+                              className="text-[10px] font-extrabold text-red-600 hover:underline"
+                            >
+                              {t('{count} Missing →', { count: p.unresolved_missing_count })}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-right font-extrabold text-slate-900">
+                        {formatTZS(p.total_amount)}
+                      </td>
+                      <td className="py-3 px-4 text-slate-700">
+                        {p.approved_by_name || p.recorded_by_name || '—'}
+                      </td>
+                      <td className="py-3 px-4 text-slate-500">
+                        {formatDate(p.approved_at || p.received_at || p.purchase_date, true)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -2529,6 +3613,7 @@ export function InventoryScreen({
                           min: formatQtyWithUnit(item.min_stock_level, item.unit),
                         })}
                       </p>
+                      <ProductSpecBadges product={item} t={t} />
                       {canOrder && Number(item.pending_order_qty || 0) > 0 && (
                         <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">
                           <Clock className="w-2.5 h-2.5" />

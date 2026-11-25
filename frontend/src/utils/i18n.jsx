@@ -83,6 +83,8 @@ const EN_KEY_LABELS = {
   'product.created': 'Product Created',
   'product.updated': 'Product Updated',
   'purchase.created': 'Purchase Recorded',
+  'purchase.missing_received': 'Missing Order Stock Received',
+  'purchase.missing_resolved': 'Missing Order Item Resolved',
   'return.processed': 'Return Processed',
   'sale.credit_created': 'Credit Sale Created',
   'sale.discount_applied': 'Sale Discount Applied',
@@ -1580,6 +1582,114 @@ export const SW_DICTIONARY = {
   'Open Expenses': 'Fungua Matumizi',
   'View Sale Receipt': 'Tazama Risiti ya Mauzo',
   'Access denied: Admin notifications are reserved for the Shop Admin.': 'Ufikiaji umezuiwa: Arifa za msimamizi ni za Msimamizi wa Duka pekee.',
+
+  // 3 Split Phone Categories, Product Specs (RAM/ROM/Storage GB), Box Packaging & Editable Stock
+  'Used Phones (Simu Used)': 'Simu Used (Used Phones)',
+  'Full Box Phones (Boxed)': 'Simu za Full Box (Boxed)',
+  'Feature Phones (Simu Ndogo)': 'Simu Ndogo (Feature Phones)',
+  'Pre-owned and refurbished smartphones with RAM and storage specifications': 'Simu janja zilizotumika (used) zenye taarifa za RAM na ukubwa wa hifadhi',
+  'Brand-new sealed full-box smartphones with RAM and storage specifications': 'Simu janja mpya za full box (boxed) zenye taarifa za RAM na ukubwa wa hifadhi',
+  'Compact keypad feature phones (simu ndogo)': 'Simu ndogo za vibonyezo (simu ndogo)',
+  'Memory cards, USB flash drives, and pen drives with storage capacity and box packaging': 'Kadi za kumbukumbu (memory cards) na flash drives zenye ukubwa wa GB na maelezo ya maboksi',
+  'Smartphone Specifications (RAM & ROM / Storage)': 'Vipimo vya Simu Janja (RAM na ROM / Hifadhi)',
+  'RAM (GB)': 'RAM (GB)',
+  'ROM / Storage (GB)': 'ROM / Hifadhi (GB)',
+  'e.g. 4GB, 6GB, 8GB, 12GB': 'mf. 4GB, 6GB, 8GB, 12GB',
+  'e.g. 64GB, 128GB, 256GB, 512GB': 'mf. 64GB, 128GB, 256GB, 512GB',
+  'Flash Drive & Memory Card Specifications (Boxes & Storage GB)': 'Vipimo vya Flash Drive na Memory Card (Maboksi na Ukubwa wa GB)',
+  'Device Storage (GB)': 'Ukubwa wa Hifadhi (GB)',
+  'e.g. 16GB, 32GB, 64GB, 128GB': 'mf. 16GB, 32GB, 64GB, 128GB',
+  'Number of Boxes': 'Idadi ya Maboksi',
+  'Number of Boxes (Optional)': 'Idadi ya Maboksi (Hiari)',
+  'Flash / Memory Cards per Box': 'Flash / Memory Card Kwenye Kila Boksi',
+  'Items per Box (Optional)': 'Idadi ya Bidhaa Kwenye Kila Boksi (Hiari)',
+  'This product is packaged in boxes (Optional)': 'Bidhaa hii iko kwenye mfumo wa maboksi (Hiari)',
+  'Tip: Entering Number of Boxes and items per box automatically calculates the total stock quantity below (you can still adjust stock manually).': 'Dokezo: Kujaza idadi ya maboksi na idadi kwenye kila boksi hukokotoa jumla ya hisa kiotomatiki hapa chini (bado unaweza kurekebisha kiasi cha hisa mwenyewe).',
+  'e.g. 4': 'mf. 4',
+  'e.g. 5': 'mf. 5',
+  'e.g. 12': 'mf. 12',
+  'e.g. 20': 'mf. 20',
+  '{boxes} box × {perBox} = {total} pcs': 'Maboksi {boxes} × {perBox} = vipande {total}',
+  '{boxes} box × {perBox}/box': 'Maboksi {boxes} × {perBox}/boksi',
+  '{boxes} boxes': 'Maboksi {boxes}',
+  '{perBox} / box': '{perBox} / boksi',
+  'Current Stock Quantity': 'Kiasi cha Hisa Kilichopo Sasa',
+  'Current Stock Quantity (Meters)': 'Kiasi cha Hisa Kilichopo (Mita)',
+  'Stock will update: {from} → {to} (recorded in Stock Movements)': 'Hisa itasasishwa: {from} → {to} (itarekodiwa kwenye Mzunguko wa Hisa)',
+  'Stock quantity edited from Product Management': 'Kiasi cha hisa kimehaririwa kwenye Usimamizi wa Bidhaa',
+
+  // Partial Order Arrival, Missing Ordered Products & PDF Export / Download / Share
+  'Review pending stock orders once delivered, approve arrived quantities, and track or export missing ordered products as PDF': 'Kagua maagizo yanayosubiri mara yanapofika, idhinisha bidhaa zilizofika, na fuatilia au pakua ripoti ya PDF ya bidhaa zilizokosekana',
+  'Missing Ordered Products': 'Bidhaa Zilizokosekana Kwenye Maagizo',
+  'Missing ordered products': 'Bidhaa zilizokosekana kwenye maagizo',
+  'Missing Ordered Products Report': 'Ripoti ya Bidhaa Zilizokosekana Kwenye Maagizo',
+  'MISSING ORDERED PRODUCTS REPORT': 'RIPOTI YA BIDHAA ZILIZOKOSEKANA KWENYE MAAGIZO',
+  'MISSING ORDERED PRODUCTS ({ref})': 'BIDHAA ZILIZOKOSEKANA KWENYE AGIZO ({ref})',
+  'Missing Ordered Products ({ref})': 'Bidhaa Zilizokosekana Kwenye Agizo ({ref})',
+  'Missing Qty': 'Zilizokosekana',
+  'Missing Value': 'Thamani Iliyokosekana',
+  'Total Payable (Arrived)': 'Jumla ya Kulipa (Zilizofika)',
+  'Approve Arrived & Log Missing': 'Idhinisha Zilizofika & Rekodi Zilizokosekana',
+  'Moved to Missing Ordered Products:': 'Zimehamishiwa Kwenye Bidhaa Zilizokosekana:',
+  'View Missing Products': 'Tazama Bidhaa Zilizokosekana',
+  'Partial delivery detected: {units} unit(s) across {lines} product(s) did not arrive and will automatically move to Missing Ordered Products after approval.': 'Mzigo umefika pungufu: vipande {units} katika bidhaa {lines} havijafika na vitahamishiwa kiotomatiki kwenye Bidhaa Zilizokosekana baada ya kuidhinisha.',
+  'e.g. Some items missing from delivery': 'mf. Baadhi ya bidhaa hazikufika kwenye mzigo',
+  'Unresolved Missing Lines': 'Bidhaa Zinazokosekana (Hazijatatuliwa)',
+  'Missing Product Lines': 'Mistari ya Bidhaa Zilizokosekana',
+  'Total Missing Units': 'Jumla ya Vipande Vilivyokosekana',
+  'Total Missing Value (TZS)': 'Jumla ya Thamani Iliyokosekana (TZS)',
+  'Search product, order ref, supplier...': 'Tafuta bidhaa, namba ya agizo, msambazaji...',
+  'Filter missing status': 'Chuja kwa hali ya ukosefu',
+  'Filter by supplier': 'Chuja kwa msambazaji',
+  'Missing Only': 'Zilizokosekana Pekee',
+  'Resolved Only': 'Zilizotatuliwa Pekee',
+  'All Statuses': 'Hali Zote',
+  'All Suppliers': 'Wasambazaji Wote',
+  'Download PDF': 'Pakua PDF',
+  'Share PDF': 'Shiriki PDF',
+  'Export / Print PDF': 'Hamisha / Chapisha PDF',
+  'Download Order Missing PDF': 'Pakua PDF ya Zilizokosekana za Agizo Hili',
+  'Share Order Missing PDF': 'Shiriki PDF ya Zilizokosekana za Agizo Hili',
+  'Order / Date': 'Agizo / Tarehe',
+  'Product & SKU': 'Bidhaa na SKU',
+  'Arrived': 'Zilizofika',
+  'Resolved': 'Imetatuliwa',
+  'Unresolved': 'Haijatatuliwa',
+  'Receive': 'Pokea',
+  'Receive Missing Stock': 'Pokea Hisa Zilizokosekana',
+  'Receive Missing Ordered Stock': 'Pokea Bidhaa Zilizokuwa Zimekosekana',
+  'Currently Missing:': 'Zilizokosekana Kwa Sasa:',
+  'Quantity Arrived Now': 'Idadi Iliyofika Sasa',
+  'Delivery Notes (Optional)': 'Maelezo ya Uwasilishaji (Hiari)',
+  'e.g. Supplier delivered remaining balance': 'mf. Msambazaji ameleta mzigo uliobaki',
+  'Confirm & Add to Stock': 'Thibitisha na Ongeza Kwenye Hisa',
+  'Mark as Resolved': 'Weka Kama Imetatuliwa',
+  'Open WhatsApp': 'Fungua WhatsApp',
+  'No missing ordered products recorded for this filter.': 'Hakuna bidhaa zilizokosekana zilizorekodiwa kwa kichujio hiki.',
+  'PDF downloaded successfully: {file}': 'Faili la PDF limepakuliwa kikamilifu: {file}',
+  'Missing products PDF shared successfully!': 'Ripoti ya PDF ya bidhaa zilizokosekana imeshirikiwa kikamilifu!',
+  'PDF downloaded ({file}) and summary copied. Attach the downloaded PDF to WhatsApp or Email to share.': 'Faili la PDF limepakuliwa ({file}) na muhtasari umenakiliwa. Ambatisha faili hilo la PDF kwenye WhatsApp au Barua Pepe ili kushiriki.',
+  'There are no missing ordered products to export.': 'Hakuna bidhaa zilizokosekana za kuhamisha kwenye PDF.',
+  'There are no missing ordered products to share.': 'Hakuna bidhaa zilizokosekana za kushiriki.',
+  '{count} Missing →': 'Zilizokosekana {count} →',
+  '{units} Missing': 'Zimekosekana {units}',
+  'GRAND TOTAL (MISSING ORDERED PRODUCTS)': 'JUMLA KUU (BIDHAA ZILIZOKOSEKANA KWENYE MAAGIZO)',
+  'Prepared / Verified By (Shop Admin)': 'Imeandaliwa / Imethibitishwa Na (Msimamizi wa Duka)',
+  'Supplier Acknowledgement & Signature': 'Uthibitisho na Saini ya Msambazaji',
+  'Digital Store Management Portal': 'Mfumo wa Kidijitali wa Usimamizi wa Duka',
+  'Page': 'Ukurasa',
+  'Filter:': 'Kichujio:',
+  'Order:': 'Agizo:',
+  'Arrived:': 'Zilizofika:',
+  'Missing:': 'Zilizokosekana:',
+  'Missing Line Items:': 'Bidhaa Zilizokosekana:',
+  'Total Missing Units:': 'Jumla ya Vipande Vilivyokosekana:',
+  'Total Missing Value:': 'Jumla ya Thamani Iliyokosekana:',
+  'Missing Order Stock Received': 'Hisa Iliyokosekana Imepokelewa',
+  'Missing Order Item Resolved': 'Bidhaa Iliyokosekana Imetatuliwa',
+  'Missing order item record not found.': 'Kumbukumbu ya bidhaa iliyokosekana haikupatikana.',
+  'This missing item has already been resolved.': 'Bidhaa hii iliyokosekana tayari imeshatatuliwa.',
+  'At least one product must have received or missing quantity to process this order.': 'Angalau bidhaa moja lazima iwe na kiasi kilichofika au kilichokosekana ili kushughulikia agizo hili.',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY
@@ -1618,6 +1728,18 @@ function translateDynamicSw(text) {
   }
   if ((m = text.match(/^Order\s+(.+?)\s+approved!\s*Stock automatically updated/i))) {
     return `Agizo ${m[1]} limeidhinishwa! Hisa za bidhaa zimesasishwa kiotomatiki kwenye mfumo mzima.`;
+  }
+  if ((m = text.match(/^Order\s+(.+?)\s+approved for arrived items!\s*(\d+)\s+missing item\(s\) moved to Missing Ordered Products\.?$/i))) {
+    return `Agizo ${m[1]} limeidhinishwa kwa bidhaa zilizofika! Bidhaa ${m[2]} zilizokosekana zimehamishiwa kwenye Bidhaa Zilizokosekana Kwenye Maagizo.`;
+  }
+  if ((m = text.match(/^Received\s+(.+?)\s+missing unit\(s\) of\s+(.+?)\.\s*Stock updated and missing item resolved!?$/i))) {
+    return `Vipande ${m[1]} vilivyokuwa vimekosekana vya ${m[2]} vimepokelewa. Hisa imesasishwa na ukosefu umetatuliwa!`;
+  }
+  if ((m = text.match(/^Received\s+(.+?)\s+unit\(s\) of\s+(.+?)\.\s*(.+?)\s+still missing\.?$/i))) {
+    return `Vipande ${m[1]} vya ${m[2]} vimepokelewa. Vipande ${m[3]} bado vinakosekana.`;
+  }
+  if ((m = text.match(/^Missing item\s+'(.+?)'\s+marked as resolved\.?$/i))) {
+    return `Bidhaa iliyokosekana '${m[1]}' imewekwa kama imetatuliwa.`;
   }
   if ((m = text.match(/^Pending order\s+(.+?)\s+has been cancelled\.?$/i))) {
     return `Agizo linalosubiri ${m[1]} limefutwa.`;

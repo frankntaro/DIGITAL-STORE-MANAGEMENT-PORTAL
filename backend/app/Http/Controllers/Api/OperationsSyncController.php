@@ -367,7 +367,7 @@ class OperationsSyncController extends BaseApiController
     public static function syncBootstrap(PDO $pdo, array $user): never
     {
         $products = $pdo->query("
-            SELECT p.*, c.`name` AS category_name,
+            SELECT p.*, c.`name` AS category_name, c.`slug` AS category_slug,
                    COALESCE(i.`available_quantity`, 0) AS available_quantity,
                    COALESCE(i.`unit_cost`, p.`purchase_price`) AS inventory_unit_cost
             FROM `products` p

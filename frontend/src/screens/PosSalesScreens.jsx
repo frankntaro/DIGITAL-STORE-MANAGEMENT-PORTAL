@@ -874,6 +874,33 @@ export function PosScreen({ user, settings, isOffline, onQueueUpdated, onViewSal
                       {product.name}
                     </p>
                     <p className="text-[10px] text-slate-400 mt-0.5">{product.sku}</p>
+                    {(product.ram_gb || product.storage_gb || Number(product.box_count || 0) > 0) && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {product.ram_gb && product.storage_gb ? (
+                          <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 text-[9px] font-extrabold">
+                            {product.ram_gb} / {product.storage_gb}
+                          </span>
+                        ) : (
+                          <>
+                            {product.ram_gb && (
+                              <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 text-[9px] font-extrabold">
+                                {product.ram_gb}
+                              </span>
+                            )}
+                            {product.storage_gb && (
+                              <span className="px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-800 text-[9px] font-extrabold">
+                                {product.storage_gb}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {Number(product.box_count || 0) > 0 && Number(product.items_per_box || 0) > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold">
+                            {product.box_count}×{product.items_per_box}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between">
                     <span className="text-xs font-extrabold text-blue-600">
