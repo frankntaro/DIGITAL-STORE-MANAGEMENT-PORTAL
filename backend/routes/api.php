@@ -254,9 +254,15 @@ if ($method === 'POST' && preg_match('#^/employees/(\d+)/reset-password$#', $pat
     EmployeeSettingsController::resetPassword($pdo, $user, (int) $m[1]);
 }
 
-// Media Uploads
+// Media Uploads & Persistent Recovery
 if ($method === 'POST' && $path === '/upload') {
     EmployeeSettingsController::uploadFile($pdo, $user);
+}
+if ($method === 'POST' && $path === '/media/check-missing') {
+    EmployeeSettingsController::checkMissingMedia($pdo, $user);
+}
+if ($method === 'POST' && $path === '/media/restore') {
+    EmployeeSettingsController::restoreCachedMedia($pdo, $user);
 }
 
 // Audit Logs

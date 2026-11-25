@@ -1709,6 +1709,7 @@ export const SW_DICTIONARY = {
   'e.g. 3, 4, 6, 8': 'mf. 3, 4, 6, 8',
   '{count} Sockets': 'Matundu {count}',
   '{count}-Way': 'Matundu {count}',
+  'Image is too large after compression (max 8MB).': 'Picha ni kubwa mno hata baada ya kupunguzwa ukubwa (kiwango cha juu ni 8MB).',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY

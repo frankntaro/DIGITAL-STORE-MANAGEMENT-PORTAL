@@ -674,4 +674,16 @@ CREATE TABLE IF NOT EXISTS `admin_notifications` (
   INDEX `idx_an_read_created` (`is_read`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 34. PERSISTENT UPLOADED MEDIA (Survives ephemeral container deploys on Render/Koyeb/Railway)
+CREATE TABLE IF NOT EXISTS `uploaded_media` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `filename` VARCHAR(160) NOT NULL UNIQUE,
+  `mime_type` VARCHAR(80) NOT NULL DEFAULT 'image/jpeg',
+  `size_bytes` INT UNSIGNED NOT NULL DEFAULT 0,
+  `data_blob` MEDIUMBLOB NOT NULL,
+  `uploaded_by` BIGINT UNSIGNED NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_um_filename` (`filename`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

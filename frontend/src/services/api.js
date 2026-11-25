@@ -62,10 +62,136 @@ export function resolveMediaUrl(url) {
   if (!url) return '';
   const trimmed = String(url).trim();
   if (!trimmed) return '';
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+    return trimmed;
+  }
+  // Normalize accidental localhost / 127.0.0.1 uploaded paths so phones load them from the live origin
+  const localUploadMatch = trimmed.match(/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(\/uploads\/.+)$/i);
+  if (localUploadMatch) {
+    return `${API_ORIGIN}${localUploadMatch[1]}`;
+  }
   if (trimmed.startsWith('/uploads/')) {
     return `${API_ORIGIN}${trimmed}`;
   }
+  if (trimmed.startsWith('uploads/')) {
+    return `${API_ORIGIN}/${trimmed}`;
+  }
+  // Prevent mixed-content blocking on mobile browsers when app runs over HTTPS
+  if (
+    typeof window !== 'undefined' &&
+    window.location?.protocol === 'https:' &&
+    trimmed.startsWith('http://') &&
+    trimmed.includes(window.location.host)
+  ) {
+    return `https://${trimmed.slice(7)}`;
+  }
   return trimmed;
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read cached image blob'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+let cachedMediaSyncRunning = false;
+
+/**
+ * Silently recovers any /uploads/img_* product photos still present in this browser's
+ * Service Worker cache (e.g. on the PC that originally uploaded them before Render redeployed)
+ * into persistent MySQL storage so all phones & devices immediately see them.
+ */
+export async function syncCachedMediaToServer() {
+  if (cachedMediaSyncRunning || typeof window === 'undefined') {
+    return;
+  }
+  if (!getAuthToken() || navigator.onLine === false) return;
+  cachedMediaSyncRunning = true;
+  try {
+    const cachedEntries = new Map();
+    const candidateFilenames = new Set();
+
+    // 1. Collect /uploads/img_* filenames from Service Worker media caches
+    if (typeof caches !== 'undefined') {
+      const cacheNames = await caches.keys();
+      const mediaCacheNames = cacheNames.filter((n) => n.includes('media'));
+      for (const cName of mediaCacheNames) {
+        const cache = await caches.open(cName);
+        const keys = await cache.keys();
+        for (const req of keys) {
+          try {
+            const u = new URL(req.url);
+            const match = u.pathname.match(/^\/uploads\/(img_[0-9]+_[a-f0-9]+\.(?:jpg|jpeg|png|webp|gif|svg|bmp|avif))$/i);
+            if (match) {
+              candidateFilenames.add(match[1]);
+              if (!cachedEntries.has(match[1])) {
+                cachedEntries.set(match[1], { cache, req });
+              }
+            }
+          } catch {
+            // ignore malformed URL
+          }
+        }
+      }
+    }
+
+    // 2. Also inspect products' /uploads/img_* filenames (recovers from standard browser HTTP disk cache too!)
+    try {
+      const prodRes = await apiRequest('/products');
+      for (const p of prodRes?.products || []) {
+        const raw = String(p?.image_url || '').trim();
+        const m = raw.match(/\/uploads\/(img_[0-9]+_[a-f0-9]+\.(?:jpg|jpeg|png|webp|gif|svg|bmp|avif))$/i);
+        if (m) candidateFilenames.add(m[1]);
+      }
+    } catch {
+      // ignore if products list unavailable
+    }
+
+    const filenames = Array.from(candidateFilenames);
+    if (filenames.length === 0) return;
+
+    const checkRes = await apiRequest('/media/check-missing', {
+      method: 'POST',
+      body: JSON.stringify({ filenames }),
+    });
+    const missing = Array.isArray(checkRes?.missing) ? checkRes.missing : [];
+    if (missing.length === 0) return;
+
+    for (const fn of missing) {
+      try {
+        let resp = null;
+        const entry = cachedEntries.get(fn);
+        if (entry) {
+          resp = await entry.cache.match(entry.req);
+        }
+        if ((!resp || !resp.ok) && window.location?.origin) {
+          // Try browser's built-in HTTP disk cache without making a network request
+          resp = await fetch(`${API_ORIGIN}/uploads/${fn}`, {
+            cache: 'only-if-cached',
+            mode: 'same-origin',
+          }).catch(() => null);
+        }
+        if (!resp || !resp.ok) continue;
+        const blob = await resp.blob();
+        if (!blob || blob.size === 0 || blob.size > 7 * 1024 * 1024) continue;
+        const base64 = await blobToDataUrl(blob);
+        if (!base64) continue;
+        await apiRequest('/media/restore', {
+          method: 'POST',
+          body: JSON.stringify({ filename: fn, base64 }),
+        });
+      } catch {
+        // non-fatal per image
+      }
+    }
+  } catch {
+    // silent background recovery
+  } finally {
+    cachedMediaSyncRunning = false;
+  }
 }
 
 export function getAuthToken() {

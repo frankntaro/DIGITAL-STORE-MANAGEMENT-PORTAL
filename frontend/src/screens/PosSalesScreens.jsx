@@ -835,13 +835,15 @@ export function PosScreen({ user, settings, isOffline, onQueueUpdated, onViewSal
                   <div>
                     <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 mb-2.5">
                       <img
-                        src={
-                          resolveMediaUrl(product.image_url) ||
-                          'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=300&q=80'
-                        }
+                        src={resolveMediaUrl(product.image_url) || '/logo.png'}
                         alt={product.name}
                         loading="lazy"
                         decoding="async"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = '/logo.png';
+                        }}
                         className="w-full h-full object-cover block group-hover:scale-105 transition"
                       />
                       {Number(product.is_newly_purchased) === 1 && !isOut && (

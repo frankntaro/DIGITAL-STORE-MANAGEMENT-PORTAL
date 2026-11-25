@@ -115,6 +115,7 @@ import {
   getOfflineQueue,
   refreshOfflineBootstrap,
   setAuthToken,
+  syncCachedMediaToServer,
   synchronizeOfflineQueue,
 } from './services/api';
 import { formatDate, formatTZS, hasPermission } from './utils/format';
@@ -279,6 +280,7 @@ export default function App() {
         refreshQueueCount();
         refreshPendingOrdersCount(res.user);
         refreshAdminNotifications(res.user);
+        syncCachedMediaToServer();
       })
       .catch((err) => {
         if (err?.status === 401 || err?.status === 403) {
@@ -471,6 +473,7 @@ export default function App() {
       await refreshOfflineBootstrap();
       await refreshQueueCount();
       await refreshPendingOrdersCount(res.user);
+      syncCachedMediaToServer();
       await refreshAdminNotifications(res.user);
     } catch (err) {
       setLoginError(err.message);

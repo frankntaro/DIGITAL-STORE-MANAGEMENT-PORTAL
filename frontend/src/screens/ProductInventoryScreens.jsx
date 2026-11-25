@@ -392,16 +392,18 @@ export function ProductsScreen({
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           <img
-                            src={
-                              resolveMediaUrl(p.image_url) ||
-                              'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=120&q=80'
-                            }
+                            src={resolveMediaUrl(p.image_url) || '/logo.png'}
                             alt={p.name}
                             width="44"
                             height="44"
                             loading="lazy"
                             decoding="async"
-                            className="w-11 h-11 rounded-xl object-cover border border-slate-200 block shrink-0"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              e.target.onerror = null;
+                              e.target.src = '/logo.png';
+                            }}
+                            className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl object-cover border border-slate-200 bg-slate-100 block shrink-0"
                           />
                           <div>
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -544,20 +546,26 @@ function readFileAsDataUrl(file) {
 async function prepareDeviceImageForUpload(file) {
   const rawDataUrl = await readFileAsDataUrl(file);
   const type = (file.type || '').toLowerCase();
+  const ext = (file.name || '').toLowerCase();
 
   // Keep SVG & animated GIF unmodified
   if (type === 'image/svg+xml' || type === 'image/gif') {
     return { uploadFile: file, previewDataUrl: rawDataUrl };
   }
 
-  // Resize large camera photos via offscreen canvas for fast, reliable upload (max 1200px)
+  // Always convert AVIF / WebP / BMP / HEIC into universal JPEG so every Android & iPhone renders cleanly
+  const isUniversalMobileFormat =
+    (type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png') &&
+    !/\.(avif|webp|bmp|heic|heif)$/i.test(ext);
+
+  // Resize large photos via offscreen canvas for fast mobile loading & compact persistent DB storage (max 960px)
   return new Promise((resolve) => {
     const img = new window.Image();
     img.onload = () => {
       try {
-        const maxDim = 1200;
+        const maxDim = 960;
         let { width, height } = img;
-        if (width <= maxDim && height <= maxDim && file.size <= 1.5 * 1024 * 1024) {
+        if (isUniversalMobileFormat && width <= maxDim && height <= maxDim && file.size <= 350 * 1024) {
           resolve({ uploadFile: file, previewDataUrl: rawDataUrl });
           return;
         }
@@ -573,11 +581,14 @@ async function prepareDeviceImageForUpload(file) {
           resolve({ uploadFile: file, previewDataUrl: rawDataUrl });
           return;
         }
+        // Fill white background before JPEG conversion (prevents black background on transparent PNG/WebP/AVIF)
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
-        const outMime = type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const outMime = type === 'image/png' && file.size <= 300 * 1024 ? 'image/png' : 'image/jpeg';
         const outExt = outMime === 'image/png' ? 'png' : 'jpg';
-        const compressedDataUrl = canvas.toDataURL(outMime, 0.86);
+        const compressedDataUrl = canvas.toDataURL(outMime, 0.84);
 
         canvas.toBlob(
           (blob) => {
@@ -590,7 +601,7 @@ async function prepareDeviceImageForUpload(file) {
             resolve({ uploadFile: compressedFile, previewDataUrl: compressedDataUrl });
           },
           outMime,
-          0.86
+          0.84
         );
       } catch {
         resolve({ uploadFile: file, previewDataUrl: rawDataUrl });
@@ -915,10 +926,11 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
                 key={previewSrc}
                 src={previewSrc}
                 alt={t('Product preview')}
+                referrerPolicy="no-referrer"
                 className="w-full h-full object-cover rounded-xl block"
                 onError={(e) => {
                   e.target.onerror = null;
-                  e.target.src = 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=300&q=80';
+                  e.target.src = '/logo.png';
                 }}
               />
             ) : (

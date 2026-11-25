@@ -410,13 +410,52 @@ class EmployeeSettingsController extends BaseApiController
         }
     }
 
-    public static function uploadFile(PDO $pdo, array $user): never
+    private static function extToMime(string $ext): string
     {
-        $uploadDir = dirname(__DIR__, 4) . '/public/uploads';
-        if (!is_dir($uploadDir) && !@mkdir($uploadDir, 0777, true) && !is_dir($uploadDir)) {
-            self::error('Failed to prepare uploads directory on server.', 500);
+        return match (strtolower($ext)) {
+            'png'  => 'image/png',
+            'webp' => 'image/webp',
+            'gif'  => 'image/gif',
+            'svg'  => 'image/svg+xml',
+            'bmp'  => 'image/bmp',
+            'avif' => 'image/avif',
+            default => 'image/jpeg',
+        };
+    }
+
+    private static function persistUploadedMedia(PDO $pdo, string $fullFilename, string $mimeType, string $bytes, ?int $userId): void
+    {
+        if (strlen($bytes) > 8 * 1024 * 1024) {
+            self::error('Image is too large after compression (max 8MB).', 422);
         }
 
+        $stmt = $pdo->prepare("
+            INSERT INTO `uploaded_media` (`filename`, `mime_type`, `size_bytes`, `data_blob`, `uploaded_by`)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                `mime_type` = VALUES(`mime_type`),
+                `size_bytes` = VALUES(`size_bytes`),
+                `data_blob` = VALUES(`data_blob`)
+        ");
+        $stmt->bindValue(1, $fullFilename, PDO::PARAM_STR);
+        $stmt->bindValue(2, $mimeType, PDO::PARAM_STR);
+        $stmt->bindValue(3, strlen($bytes), PDO::PARAM_INT);
+        $stmt->bindValue(4, $bytes, PDO::PARAM_LOB);
+        $stmt->bindValue(5, $userId, $userId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->execute();
+
+        // Warm local disk cache (non-fatal on ephemeral/read-only containers)
+        $uploadDir = dirname(__DIR__, 4) . '/public/uploads';
+        if (!is_dir($uploadDir)) {
+            @mkdir($uploadDir, 0777, true);
+        }
+        if (is_dir($uploadDir)) {
+            @file_put_contents($uploadDir . '/' . $fullFilename, $bytes);
+        }
+    }
+
+    public static function uploadFile(PDO $pdo, array $user): never
+    {
         $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
             || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
             || (int) ($_SERVER['SERVER_PORT'] ?? 0) === 443;
@@ -459,17 +498,21 @@ class EmployeeSettingsController extends BaseApiController
                     $ext = $mimeToExt[$mime];
                 }
 
-                $targetPath = $uploadDir . '/' . $filename . '.' . $ext;
-                if (move_uploaded_file($tmpName, $targetPath)) {
-                    $relPath = '/uploads/' . $filename . '.' . $ext;
+                $bytes = @file_get_contents($tmpName);
+                if ($bytes !== false && $bytes !== '') {
+                    $fullFilename = $filename . '.' . $ext;
+                    $resolvedMime = self::extToMime($ext);
+                    self::persistUploadedMedia($pdo, $fullFilename, $resolvedMime, $bytes, (int) ($user['id'] ?? 0) ?: null);
+                    $relPath = '/uploads/' . $fullFilename;
                     self::json([
                         'success'      => true,
                         'path'         => $relPath,
                         'url'          => $relPath,
                         'absolute_url' => $baseUrl . $relPath,
+                        'persistent'   => true,
                     ]);
                 }
-                self::error('Failed to save uploaded image on server.', 500);
+                self::error('Failed to read uploaded image on server.', 500);
             }
         }
 
@@ -495,21 +538,96 @@ class EmployeeSettingsController extends BaseApiController
             }
 
             if ($decoded !== false && $decoded !== '') {
-                $targetPath = $uploadDir . '/' . $filename . '.' . $ext;
-                if (@file_put_contents($targetPath, $decoded) !== false) {
-                    $relPath = '/uploads/' . $filename . '.' . $ext;
-                    self::json([
-                        'success'      => true,
-                        'path'         => $relPath,
-                        'url'          => $relPath,
-                        'absolute_url' => $baseUrl . $relPath,
-                    ]);
-                }
-                self::error('Failed to write image file on server.', 500);
+                $fullFilename = $filename . '.' . $ext;
+                $resolvedMime = self::extToMime($ext);
+                self::persistUploadedMedia($pdo, $fullFilename, $resolvedMime, $decoded, (int) ($user['id'] ?? 0) ?: null);
+                $relPath = '/uploads/' . $fullFilename;
+                self::json([
+                    'success'      => true,
+                    'path'         => $relPath,
+                    'url'          => $relPath,
+                    'absolute_url' => $baseUrl . $relPath,
+                    'persistent'   => true,
+                ]);
             }
         }
 
         self::error('No valid image file or data provided.', 422);
+    }
+
+    /**
+     * Checks which /uploads/{filename} images cached in a browser are missing from persistent MySQL storage.
+     */
+    public static function checkMissingMedia(PDO $pdo, array $user): never
+    {
+        $data = self::input();
+        $filenames = $data['filenames'] ?? [];
+        if (!is_array($filenames) || empty($filenames)) {
+            self::json(['success' => true, 'missing' => []]);
+        }
+
+        $cleanNames = [];
+        foreach (array_slice($filenames, 0, 120) as $fn) {
+            $name = basename(trim((string) $fn));
+            if (preg_match('/^img_[0-9]+_[a-f0-9]+\.(jpg|jpeg|png|webp|gif|svg|bmp|avif)$/i', $name)) {
+                $cleanNames[$name] = true;
+            }
+        }
+        $cleanList = array_keys($cleanNames);
+        if (empty($cleanList)) {
+            self::json(['success' => true, 'missing' => []]);
+        }
+
+        $placeholders = implode(',', array_fill(0, count($cleanList), '?'));
+        $stmt = $pdo->prepare("SELECT `filename` FROM `uploaded_media` WHERE `filename` IN ({$placeholders})");
+        $stmt->execute($cleanList);
+        $existing = array_flip($stmt->fetchAll(PDO::FETCH_COLUMN));
+
+        $missing = [];
+        foreach ($cleanList as $name) {
+            if (!isset($existing[$name])) {
+                $missing[] = $name;
+            }
+        }
+
+        self::json(['success' => true, 'missing' => $missing]);
+    }
+
+    /**
+     * Restores a previously uploaded /uploads/{filename} image from a browser cache into persistent MySQL storage.
+     */
+    public static function restoreCachedMedia(PDO $pdo, array $user): never
+    {
+        $data = self::input();
+        $filename = basename(trim((string) ($data['filename'] ?? '')));
+        $rawBase64 = trim((string) ($data['base64'] ?? ''));
+
+        if (!preg_match('/^img_[0-9]+_[a-f0-9]+\.(jpg|jpeg|png|webp|gif|svg|bmp|avif)$/i', $filename, $fm)) {
+            self::error('Invalid media filename.', 422);
+        }
+
+        // Skip if already safely stored in MySQL
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM `uploaded_media` WHERE `filename` = ?");
+        $chk->execute([$filename]);
+        if ((int) $chk->fetchColumn() > 0) {
+            self::json(['success' => true, 'restored' => false, 'filename' => $filename]);
+        }
+
+        $ext = strtolower($fm[1]) === 'jpeg' ? 'jpg' : strtolower($fm[1]);
+        $mime = self::extToMime($ext);
+        if (preg_match('#^data:(image/[a-z0-9.+-]+);base64,(.+)$#is', $rawBase64, $m)) {
+            $mime = strtolower($m[1]);
+            $decoded = base64_decode(preg_replace('/\s+/', '', $m[2]), true);
+        } else {
+            $decoded = base64_decode(preg_replace('/\s+/', '', $rawBase64), true);
+        }
+
+        if ($decoded === false || $decoded === '') {
+            self::error('Invalid image data.', 422);
+        }
+
+        self::persistUploadedMedia($pdo, $filename, $mime, $decoded, (int) ($user['id'] ?? 0) ?: null);
+        self::json(['success' => true, 'restored' => true, 'filename' => $filename]);
     }
 
     public static function getSettings(PDO $pdo, array $user): never

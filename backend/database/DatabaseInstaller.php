@@ -7,7 +7,7 @@ use PDOException;
 
 class DatabaseInstaller
 {
-    private const SCHEMA_VERSION = '2026.11.25.extension-cables-sockets-v1';
+    private const SCHEMA_VERSION = '2026.11.25.persistent-media-storage-v1';
     private const PURGE_DEMO_MIGRATION = '2026_11_25_purge_demo_data_v1';
     private static ?array $cachedConfig = null;
     private static bool $dbJustCreated = false;
@@ -514,6 +514,20 @@ class DatabaseInstaller
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ");
 
+            // Ensure persistent uploaded_media table exists (survives ephemeral Render container restarts)
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS `uploaded_media` (
+                  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                  `filename` VARCHAR(160) NOT NULL UNIQUE,
+                  `mime_type` VARCHAR(80) NOT NULL DEFAULT 'image/jpeg',
+                  `size_bytes` INT UNSIGNED NOT NULL DEFAULT 0,
+                  `data_blob` MEDIUMBLOB NOT NULL,
+                  `uploaded_by` BIGINT UNSIGNED NULL,
+                  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  INDEX `idx_um_filename` (`filename`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+
             // Ensure admin notifications table exists (Employee sales, sold-out products & expenses)
             $pdo->exec("
                 CREATE TABLE IF NOT EXISTS `admin_notifications` (
@@ -626,6 +640,7 @@ class DatabaseInstaller
             'audit_logs',
             'sync_records',
             'admin_notifications',
+            'uploaded_media',
         ];
 
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");

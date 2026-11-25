@@ -67,14 +67,66 @@ $serveStaticFile = static function (string $filePath, string $cacheControl): nev
     exit;
 };
 
-// 1. Uploaded product media under /uploads/*
+// 1. Uploaded product media under /uploads/* (disk cache + persistent MySQL fallback)
 if (str_starts_with($requestPath, '/uploads/')) {
-    $uploadsRoot = realpath(__DIR__ . '/uploads');
     $relativePath = ltrim(substr($requestPath, strlen('/uploads/')), '/\\');
-    $candidatePath = $uploadsRoot ? realpath($uploadsRoot . DIRECTORY_SEPARATOR . $relativePath) : false;
+    $safeFilename = (preg_match('/^[A-Za-z0-9._-]+$/', $relativePath) && !str_contains($relativePath, '..'))
+        ? $relativePath
+        : '';
 
-    if ($uploadsRoot && $candidatePath && str_starts_with($candidatePath, $uploadsRoot) && is_file($candidatePath)) {
-        $serveStaticFile($candidatePath, 'public, max-age=31536000, immutable');
+    if ($safeFilename !== '') {
+        $uploadsDir = __DIR__ . '/uploads';
+        $uploadsRoot = realpath($uploadsDir);
+        $candidatePath = $uploadsRoot ? realpath($uploadsRoot . DIRECTORY_SEPARATOR . $safeFilename) : false;
+
+        if ($uploadsRoot && $candidatePath && str_starts_with($candidatePath, $uploadsRoot) && is_file($candidatePath)) {
+            $serveStaticFile($candidatePath, 'public, max-age=31536000, immutable');
+        }
+
+        // Persistent fallback: fetch from MySQL uploaded_media (survives Render container restarts/redeploys)
+        try {
+            require_once dirname(__DIR__) . '/bootstrap/autoload.php';
+            $pdoMedia = \App\Database\DatabaseInstaller::connect();
+            $stmtMedia = $pdoMedia->prepare("
+                SELECT `mime_type`, `size_bytes`, `data_blob`, UNIX_TIMESTAMP(`created_at`) AS ts
+                FROM `uploaded_media`
+                WHERE `filename` = ?
+                LIMIT 1
+            ");
+            $stmtMedia->execute([$safeFilename]);
+            $mediaRow = $stmtMedia->fetch();
+            if ($mediaRow && isset($mediaRow['data_blob']) && $mediaRow['data_blob'] !== '') {
+                $bytes = (string) $mediaRow['data_blob'];
+                $mime = (string) ($mediaRow['mime_type'] ?: 'image/jpeg');
+                $size = strlen($bytes);
+                $ts = (int) ($mediaRow['ts'] ?: time());
+                $etag = '"' . md5($safeFilename . '|' . $size . '|' . $ts) . '"';
+
+                // Warm local disk cache for future ultra-fast hits
+                if (!is_dir($uploadsDir)) {
+                    @mkdir($uploadsDir, 0777, true);
+                }
+                if (is_dir($uploadsDir)) {
+                    @file_put_contents($uploadsDir . DIRECTORY_SEPARATOR . $safeFilename, $bytes);
+                }
+
+                header('Content-Type: ' . $mime);
+                header('ETag: ' . $etag);
+                header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $ts) . ' GMT');
+                header('Cache-Control: public, max-age=31536000, immutable');
+                if (trim((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) === $etag) {
+                    http_response_code(304);
+                    exit;
+                }
+                header('Content-Length: ' . (string) $size);
+                if ($requestMethod !== 'HEAD') {
+                    echo $bytes;
+                }
+                exit;
+            }
+        } catch (Throwable $ignored) {
+            // Fall through cleanly to 404 if DB table isn't ready or file doesn't exist
+        }
     }
 
     http_response_code(404);
