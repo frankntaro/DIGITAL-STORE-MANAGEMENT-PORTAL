@@ -115,9 +115,9 @@ class CatalogInventoryController extends BaseApiController
             )";
         }
         if ($search !== '') {
-            $where[] = "(p.`name` LIKE ? OR p.`sku` LIKE ? OR p.`barcode` LIKE ? OR p.`brand` LIKE ? OR p.`model` LIKE ? OR p.`ram_gb` LIKE ? OR p.`storage_gb` LIKE ? OR p.`tv_size_inches` LIKE ?)";
+            $where[] = "(p.`name` LIKE ? OR p.`sku` LIKE ? OR p.`barcode` LIKE ? OR p.`brand` LIKE ? OR p.`model` LIKE ? OR p.`ram_gb` LIKE ? OR p.`storage_gb` LIKE ? OR p.`tv_size_inches` LIKE ? OR CAST(p.`socket_count` AS CHAR) LIKE ?)";
             $like = "%{$search}%";
-            array_push($params, $like, $like, $like, $like, $like, $like, $like, $like);
+            array_push($params, $like, $like, $like, $like, $like, $like, $like, $like, $like);
         }
 
         $whereSql = implode(' AND ', $where);
@@ -298,6 +298,7 @@ class CatalogInventoryController extends BaseApiController
         $ramGb = $isFeaturePhone ? null : self::normalizeCapacitySpec($data['ram_gb'] ?? null);
         $storageGb = $isFeaturePhone ? null : self::normalizeCapacitySpec($data['storage_gb'] ?? null);
         $tvSizeInches = self::normalizeTvSizeInches($data['tv_size_inches'] ?? null);
+        $socketCount = self::normalizePositiveIntOrNull($data['socket_count'] ?? null);
         $boxCount = self::normalizePositiveIntOrNull($data['box_count'] ?? null);
         $itemsPerBox = self::normalizePositiveIntOrNull($data['items_per_box'] ?? null);
         $description = trim((string) ($data['description'] ?? '')) ?: null;
@@ -336,14 +337,14 @@ class CatalogInventoryController extends BaseApiController
             $stmt = $pdo->prepare("
                 INSERT INTO `products` (
                     `sku`, `barcode`, `name`, `category_id`, `brand`, `model`,
-                    `ram_gb`, `storage_gb`, `tv_size_inches`, `box_count`, `items_per_box`, `description`,
+                    `ram_gb`, `storage_gb`, `tv_size_inches`, `socket_count`, `box_count`, `items_per_box`, `description`,
                     `purchase_price`, `selling_price`, `weighted_avg_cost`, `unit`, `min_stock_level`,
                     `warranty_months`, `image_url`, `status`, `created_by`
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
             ");
             $stmt->execute([
                 $sku, $barcode, $name, $categoryId, $brand, $model,
-                $ramGb, $storageGb, $tvSizeInches, $boxCount, $itemsPerBox, $description,
+                $ramGb, $storageGb, $tvSizeInches, $socketCount, $boxCount, $itemsPerBox, $description,
                 $purchasePrice, $sellingPrice, $purchasePrice, $unit, $minStock,
                 $warrantyMonths, $imageUrl, $user['id']
             ]);
@@ -426,6 +427,9 @@ class CatalogInventoryController extends BaseApiController
             $newTvSizeInches = array_key_exists('tv_size_inches', $data)
                 ? self::normalizeTvSizeInches($data['tv_size_inches'])
                 : ($before['tv_size_inches'] ?? null);
+            $newSocketCount = array_key_exists('socket_count', $data)
+                ? self::normalizePositiveIntOrNull($data['socket_count'])
+                : ($before['socket_count'] ?? null);
             $newBoxCount = array_key_exists('box_count', $data)
                 ? self::normalizePositiveIntOrNull($data['box_count'])
                 : ($before['box_count'] ?? null);
@@ -452,6 +456,7 @@ class CatalogInventoryController extends BaseApiController
                     `ram_gb` = ?,
                     `storage_gb` = ?,
                     `tv_size_inches` = ?,
+                    `socket_count` = ?,
                     `box_count` = ?,
                     `items_per_box` = ?,
                     `description` = ?,
@@ -473,6 +478,7 @@ class CatalogInventoryController extends BaseApiController
                 $newRamGb,
                 $newStorageGb,
                 $newTvSizeInches,
+                $newSocketCount,
                 $newBoxCount,
                 $newItemsPerBox,
                 isset($data['description']) ? (trim((string) $data['description']) ?: null) : $before['description'],
@@ -571,6 +577,7 @@ class CatalogInventoryController extends BaseApiController
                     'ram_gb'         => $newRamGb,
                     'storage_gb'     => $newStorageGb,
                     'tv_size_inches' => $newTvSizeInches,
+                    'socket_count'   => $newSocketCount,
                     'box_count'      => $newBoxCount,
                     'items_per_box'  => $newItemsPerBox,
                 ],
@@ -1853,7 +1860,7 @@ class CatalogInventoryController extends BaseApiController
 
         $productsStmt = $pdo->query("
             SELECT p.`id`, p.`sku`, p.`barcode`, p.`name`, p.`brand`, p.`model`,
-                   p.`ram_gb`, p.`storage_gb`, p.`tv_size_inches`, p.`box_count`, p.`items_per_box`, p.`unit`,
+                   p.`ram_gb`, p.`storage_gb`, p.`tv_size_inches`, p.`socket_count`, p.`box_count`, p.`items_per_box`, p.`unit`,
                    p.`purchase_price`, p.`selling_price`, p.`weighted_avg_cost`,
                    p.`min_stock_level`, p.`image_url`, p.`status`,
                    c.`name` AS category_name,

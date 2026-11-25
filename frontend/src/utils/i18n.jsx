@@ -1700,6 +1700,15 @@ export const SW_DICTIONARY = {
   'TV Screen Size (Inches)': 'TV Inchi Ngapi? (Ukubwa wa Skrini)',
   'e.g. 24", 32", 43", 55", 65"': 'mf. Inchi 24", 32", 43", 55", 65"',
   'TV {size}': 'TV {size}',
+
+  // Extension Cables Category & Socket Count (Matundu)
+  'Extension Cables': 'Extension Cables (Waya za Kuongeza Soketi)',
+  'Power extension cables, surge protectors, and multi-socket power strips': 'Extension cables za umeme, surge protectors na soketi za matundu mengi',
+  'Extension Cable Specifications (Number of Sockets)': 'Vipimo vya Extension Cable (Idadi ya Matundu)',
+  'Number of Sockets / Outlets': 'Ina Matundu Mangapi? (Idadi ya Soketi)',
+  'e.g. 3, 4, 6, 8': 'mf. 3, 4, 6, 8',
+  '{count} Sockets': 'Matundu {count}',
+  '{count}-Way': 'Matundu {count}',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY

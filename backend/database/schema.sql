@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   `ram_gb` VARCHAR(30) NULL,
   `storage_gb` VARCHAR(30) NULL,
   `tv_size_inches` VARCHAR(30) NULL,
+  `socket_count` INT UNSIGNED NULL,
   `box_count` INT UNSIGNED NULL,
   `items_per_box` INT UNSIGNED NULL,
   `description` TEXT NULL,

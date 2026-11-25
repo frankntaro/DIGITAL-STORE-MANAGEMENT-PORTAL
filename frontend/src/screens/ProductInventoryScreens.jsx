@@ -18,6 +18,7 @@ import {
   MessageCircle,
   Package,
   PackagePlus,
+  Plug,
   Plus,
   Printer,
   RefreshCw,
@@ -57,22 +58,30 @@ const RAM_PRESETS = ['2GB', '3GB', '4GB', '6GB', '8GB', '12GB', '16GB'];
 const PHONE_STORAGE_PRESETS = ['32GB', '64GB', '128GB', '256GB', '512GB', '1TB'];
 const MEDIA_STORAGE_PRESETS = ['2GB', '4GB', '8GB', '16GB', '32GB', '64GB', '128GB', '256GB', '512GB', '1TB'];
 const TV_INCH_PRESETS = ['19"', '24"', '32"', '40"', '43"', '50"', '55"', '65"', '75"', '85"'];
+const SOCKET_COUNT_PRESETS = ['2', '3', '4', '5', '6', '8', '10', '12'];
 
 function ProductSpecBadges({ product, t }) {
   const hasRam = Boolean(product?.ram_gb);
   const hasStorage = Boolean(product?.storage_gb);
   const hasTvSize = Boolean(product?.tv_size_inches);
+  const socketCount = Number(product?.socket_count || 0);
+  const hasSockets = socketCount > 0;
   const boxCount = Number(product?.box_count || 0);
   const itemsPerBox = Number(product?.items_per_box || 0);
   const hasBoxes = boxCount > 0 || itemsPerBox > 0;
 
-  if (!hasRam && !hasStorage && !hasTvSize && !hasBoxes) return null;
+  if (!hasRam && !hasStorage && !hasTvSize && !hasSockets && !hasBoxes) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1 mt-1">
       {hasTvSize && (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-teal-100 text-teal-800">
           {t('TV {size}', { size: product.tv_size_inches })}
+        </span>
+      )}
+      {hasSockets && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-orange-100 text-orange-800">
+          {t('{count} Sockets', { count: socketCount })}
         </span>
       )}
       {hasRam && hasStorage ? (
@@ -611,6 +620,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
     ram_gb: editingProduct?.ram_gb || '',
     storage_gb: editingProduct?.storage_gb || '',
     tv_size_inches: editingProduct?.tv_size_inches || '',
+    socket_count: editingProduct?.socket_count ?? '',
     box_count: editingProduct?.box_count ?? '',
     items_per_box: editingProduct?.items_per_box ?? '',
     sku: editingProduct?.sku || '',
@@ -643,6 +653,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
       ram_gb: editingProduct?.ram_gb || '',
       storage_gb: editingProduct?.storage_gb || '',
       tv_size_inches: editingProduct?.tv_size_inches || '',
+      socket_count: editingProduct?.socket_count ?? '',
       box_count: editingProduct?.box_count ?? '',
       items_per_box: editingProduct?.items_per_box ?? '',
       sku: editingProduct?.sku || '',
@@ -809,6 +820,10 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
       catSlug === 'tvs' ||
       catSlug === 'tvs-and-remotes' ||
       /\btv\b|\btvs\b|runinga|television/i.test(catName));
+  const isExtensionCableCategory =
+    catSlug === 'extension-cables' ||
+    catSlug === 'extensions-cable' ||
+    catName.includes('extension');
 
   const updateBoxField = (field, rawValue) => {
     setForm((prev) => {
@@ -834,6 +849,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
       ram_gb: isSmartphoneCategory ? form.ram_gb : '',
       storage_gb: isSmartphoneCategory || isStorageMediaCategory ? form.storage_gb : '',
       tv_size_inches: isTvCategory ? form.tv_size_inches : '',
+      socket_count: isExtensionCableCategory ? form.socket_count : '',
       box_count: includeBoxes ? form.box_count : '',
       items_per_box: includeBoxes ? form.items_per_box : '',
     };
@@ -1292,6 +1308,56 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
                       }`}
                     >
                       {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Dynamic Category Specifications: Extension Cables (Number of Sockets / Outlets) */}
+          {isExtensionCableCategory && (
+            <div className="sm:col-span-2 rounded-2xl border border-orange-200 bg-orange-50/70 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Plug className="w-4 h-4 text-orange-700" />
+                  <span className="text-xs font-extrabold text-orange-900">
+                    {t('Extension Cable Specifications (Number of Sockets)')}
+                  </span>
+                </div>
+                {Number(form.socket_count || 0) > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-orange-600 text-white text-[10px] font-extrabold">
+                    {t('{count} Sockets', { count: Number(form.socket_count) })}
+                  </span>
+                )}
+              </div>
+              <div>
+                <label htmlFor="prod-socket-count" className="block text-[11px] font-bold text-orange-900 mb-1">
+                  {t('Number of Sockets / Outlets')}
+                </label>
+                <input
+                  id="prod-socket-count"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={form.socket_count}
+                  onChange={(e) => setForm({ ...form, socket_count: e.target.value })}
+                  placeholder={t('e.g. 3, 4, 6, 8')}
+                  className="w-full px-3 py-2 rounded-xl border border-orange-300 bg-white text-xs font-semibold"
+                />
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {SOCKET_COUNT_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setForm({ ...form, socket_count: preset })}
+                      className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold border transition ${
+                        String(form.socket_count).trim() === preset
+                          ? 'bg-orange-600 text-white border-orange-600'
+                          : 'bg-white text-orange-900 border-orange-200 hover:bg-orange-100'
+                      }`}
+                    >
+                      {t('{count}-Way', { count: preset })}
                     </button>
                   ))}
                 </div>

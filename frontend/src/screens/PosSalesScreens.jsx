@@ -874,11 +874,16 @@ export function PosScreen({ user, settings, isOffline, onQueueUpdated, onViewSal
                       {product.name}
                     </p>
                     <p className="text-[10px] text-slate-400 mt-0.5">{product.sku}</p>
-                    {(product.ram_gb || product.storage_gb || product.tv_size_inches || Number(product.box_count || 0) > 0) && (
+                    {(product.ram_gb || product.storage_gb || product.tv_size_inches || Number(product.socket_count || 0) > 0 || Number(product.box_count || 0) > 0) && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {product.tv_size_inches && (
                           <span className="px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[9px] font-extrabold">
                             {t('TV {size}', { size: product.tv_size_inches })}
+                          </span>
+                        )}
+                        {Number(product.socket_count || 0) > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 text-[9px] font-extrabold">
+                            {t('{count} Sockets', { count: Number(product.socket_count) })}
                           </span>
                         )}
                         {product.ram_gb && product.storage_gb ? (

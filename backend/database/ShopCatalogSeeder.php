@@ -18,6 +18,7 @@ class ShopCatalogSeeder
             ['Feature Phones (Simu Ndogo)', 'feature-phones', 'Smartphone', 'Compact keypad feature phones (simu ndogo)', 1],
             ['Phone Accessories', 'phone-accessories', 'ShieldCheck', 'Phone covers, tempered glass, casings, phone batteries, mouse & keyboard', 1],
             ['Chargers and Cables', 'chargers-and-cables', 'Zap', 'Fast chargers, adapters, USB-C & Lightning cables, and power cables', 1],
+            ['Extension Cables', 'extension-cables', 'Plug', 'Power extension cables, surge protectors, and multi-socket power strips', 1],
             ['Earphones and Headphones', 'earphones-and-headphones', 'Headphones', 'Wireless earbuds, pods, headphones, and wireless microphones', 1],
             ['Speakers & Radios', 'speakers', 'Volume2', 'Bluetooth speakers, subwoofers (bufa), and portable radios', 1],
             ['Tablets', 'tablets', 'Tablet', 'iPads, Android tablets, and educational slates', 1],

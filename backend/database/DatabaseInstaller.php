@@ -7,7 +7,7 @@ use PDOException;
 
 class DatabaseInstaller
 {
-    private const SCHEMA_VERSION = '2026.11.25.tv-category-screen-size-v1';
+    private const SCHEMA_VERSION = '2026.11.25.extension-cables-sockets-v1';
     private const PURGE_DEMO_MIGRATION = '2026_11_25_purge_demo_data_v1';
     private static ?array $cachedConfig = null;
     private static bool $dbJustCreated = false;
@@ -465,6 +465,10 @@ class DatabaseInstaller
             $hasTvSize = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'tv_size_inches'")->fetchAll();
             if (empty($hasTvSize)) {
                 $pdo->exec("ALTER TABLE `products` ADD COLUMN `tv_size_inches` VARCHAR(30) NULL AFTER `storage_gb`");
+            }
+            $hasSocketCount = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'socket_count'")->fetchAll();
+            if (empty($hasSocketCount)) {
+                $pdo->exec("ALTER TABLE `products` ADD COLUMN `socket_count` INT UNSIGNED NULL AFTER `tv_size_inches`");
             }
             $hasBoxCount = $pdo->query("SHOW COLUMNS FROM `products` LIKE 'box_count'")->fetchAll();
             if (empty($hasBoxCount)) {
