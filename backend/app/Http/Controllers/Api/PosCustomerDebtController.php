@@ -124,6 +124,158 @@ class PosCustomerDebtController extends BaseApiController
     }
 
     /**
+     * Admin-only atomic Sale Reversal: reverses a test or mistaken sale, restores all sold
+     * product quantities back into available stock, removes linked cash/debt/warranty records,
+     * and recalculates affected cash register sessions.
+     */
+    public static function reverseSale(PDO $pdo, array $user, int $saleId): never
+    {
+        self::requirePermission($user, 'sales.reverse');
+        if (!in_array('owner', $user['role_slugs'] ?? [], true)) {
+            self::error('Access denied: Only the Shop Admin can reverse sales and restore stock.', 403);
+        }
+
+        $data = self::input();
+        $reason = trim((string) ($data['reason'] ?? 'Reversed by Admin and product returned to stock'));
+
+        $pdo->beginTransaction();
+        try {
+            $saleStmt = $pdo->prepare("SELECT * FROM `sales` WHERE `id` = ? FOR UPDATE");
+            $saleStmt->execute([$saleId]);
+            $sale = $saleStmt->fetch();
+            if (!$sale) {
+                $pdo->rollBack();
+                self::error('Sale transaction not found.', 404);
+            }
+
+            $receiptNo = (string) $sale['receipt_number'];
+
+            $itemsStmt = $pdo->prepare("SELECT * FROM `sale_items` WHERE `sale_id` = ? ORDER BY `id` ASC");
+            $itemsStmt->execute([$saleId]);
+            $items = $itemsStmt->fetchAll();
+
+            $restoredItems = [];
+            $totalUnitsRestored = 0.0;
+
+            foreach ($items as $it) {
+                $pid = (int) $it['product_id'];
+                $restoreQty = round(max(0.0, (float) $it['quantity'] - (float) ($it['returned_quantity'] ?? 0)), 2);
+                if ($pid > 0 && $restoreQty > 0.001) {
+                    $invStmt = $pdo->prepare("SELECT * FROM `inventories` WHERE `product_id` = ? FOR UPDATE");
+                    $invStmt->execute([$pid]);
+                    $inv = $invStmt->fetch();
+                    $prevQty = $inv ? round((float) $inv['available_quantity'], 2) : 0.0;
+                    $newQty = round($prevQty + $restoreQty, 2);
+
+                    if ($inv) {
+                        $pdo->prepare("
+                            UPDATE `inventories`
+                            SET `available_quantity` = ?, `last_counted_at` = NOW()
+                            WHERE `product_id` = ?
+                        ")->execute([$newQty, $pid]);
+                    } else {
+                        $pdo->prepare("
+                            INSERT INTO `inventories` (`product_id`, `available_quantity`, `unit_cost`, `last_counted_at`)
+                            VALUES (?, ?, ?, NOW())
+                        ")->execute([$pid, $newQty, (float) ($it['historical_unit_cost'] ?? 0)]);
+                    }
+
+                    $totalUnitsRestored += $restoreQty;
+                    $restoredItems[] = [
+                        'product_id'        => $pid,
+                        'product_name'      => $it['product_name_snapshot'],
+                        'restored_quantity' => $restoreQty,
+                        'previous_quantity' => $prevQty,
+                        'new_quantity'      => $newQty,
+                    ];
+                }
+            }
+
+            // Collect dependent IDs & affected cash sessions
+            $cpIds = array_map('intval', $pdo->query("SELECT `id` FROM `customer_payments` WHERE `sale_id` = {$saleId}")->fetchAll(PDO::FETCH_COLUMN));
+            $retIds = array_map('intval', $pdo->query("SELECT `id` FROM `returns` WHERE `sale_id` = {$saleId}")->fetchAll(PDO::FETCH_COLUMN));
+            $warIds = array_map('intval', $pdo->query("SELECT `id` FROM `warranties` WHERE `sale_id` = {$saleId}")->fetchAll(PDO::FETCH_COLUMN));
+
+            $affectedSessions = [];
+            if (!empty($sale['cash_session_id'])) {
+                $affectedSessions[(int) $sale['cash_session_id']] = true;
+            }
+            $cmSessionsStmt = $pdo->prepare("SELECT DISTINCT `cash_session_id` FROM `cash_movements` WHERE `reference_type` = 'Sale' AND `reference_id` = ? AND `cash_session_id` IS NOT NULL");
+            $cmSessionsStmt->execute([$saleId]);
+            foreach ($cmSessionsStmt->fetchAll(PDO::FETCH_COLUMN) as $sid) {
+                $affectedSessions[(int) $sid] = true;
+            }
+            if (!empty($cpIds)) {
+                $cpIn = implode(',', $cpIds);
+                foreach ($pdo->query("SELECT DISTINCT `cash_session_id` FROM `cash_movements` WHERE `reference_type` = 'CustomerPayment' AND `reference_id` IN ({$cpIn}) AND `cash_session_id` IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN) as $sid) {
+                    $affectedSessions[(int) $sid] = true;
+                }
+                $pdo->exec("DELETE FROM `cash_movements` WHERE `reference_type` = 'CustomerPayment' AND `reference_id` IN ({$cpIn})");
+            }
+            if (!empty($retIds)) {
+                $retIn = implode(',', $retIds);
+                foreach ($pdo->query("SELECT DISTINCT `cash_session_id` FROM `cash_movements` WHERE `reference_type` = 'Return' AND `reference_id` IN ({$retIn}) AND `cash_session_id` IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN) as $sid) {
+                    $affectedSessions[(int) $sid] = true;
+                }
+                $pdo->exec("DELETE FROM `cash_movements` WHERE `reference_type` = 'Return' AND `reference_id` IN ({$retIn})");
+                $pdo->exec("DELETE FROM `stock_movements` WHERE `reference_type` = 'Return' AND `reference_id` IN ({$retIn})");
+                $pdo->exec("DELETE FROM `return_items` WHERE `return_id` IN ({$retIn})");
+                $pdo->exec("DELETE FROM `returns` WHERE `id` IN ({$retIn})");
+            }
+            if (!empty($warIds)) {
+                $warIn = implode(',', $warIds);
+                $pdo->exec("DELETE FROM `warranty_claims` WHERE `warranty_id` IN ({$warIn})");
+                $pdo->exec("DELETE FROM `warranties` WHERE `id` IN ({$warIn})");
+            }
+
+            $pdo->prepare("DELETE FROM `cash_movements` WHERE `reference_type` = 'Sale' AND `reference_id` = ?")->execute([$saleId]);
+            $pdo->prepare("DELETE FROM `stock_movements` WHERE `reference_type` = 'Sale' AND `reference_id` = ?")->execute([$saleId]);
+            $pdo->prepare("DELETE FROM `customer_payments` WHERE `sale_id` = ?")->execute([$saleId]);
+            $pdo->prepare("DELETE FROM `admin_notifications` WHERE `entity_type` = 'Sale' AND `entity_id` = ?")->execute([$saleId]);
+            $pdo->prepare("DELETE FROM `sale_items` WHERE `sale_id` = ?")->execute([$saleId]);
+            $pdo->prepare("DELETE FROM `sales` WHERE `id` = ?")->execute([$saleId]);
+
+            foreach (array_keys($affectedSessions) as $sid) {
+                if ($sid > 0) {
+                    FinancialService::recalculateCashSession($pdo, $sid);
+                }
+            }
+
+            AuditService::log(
+                $pdo,
+                (int) $user['id'],
+                'sale.reversed',
+                'Sale',
+                $saleId,
+                [
+                    'receipt_number' => $receiptNo,
+                    'total_amount'   => $sale['total_amount'],
+                    'items_count'    => count($items),
+                ],
+                [
+                    'reversed'       => true,
+                    'restored_items' => $restoredItems,
+                ],
+                $reason
+            );
+
+            $pdo->commit();
+            self::json([
+                'success'             => true,
+                'message'             => "Sale {$receiptNo} reversed and product stock restored successfully.",
+                'receipt_number'      => $receiptNo,
+                'total_units_restored'=> round($totalUnitsRestored, 2),
+                'restored_items'      => $restoredItems,
+            ]);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            self::error('Failed to reverse sale: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * Reusable atomic POS sale processor (used by direct POS checkout and offline SyncQueue)
      */
     public static function processSaleTransaction(PDO $pdo, array $user, array $data): array

@@ -176,6 +176,9 @@ if ($method === 'GET' && preg_match('#^/sales/(\d+)$#', $path, $m)) {
 if ($method === 'POST' && $path === '/sales') {
     PosCustomerDebtController::createSale($pdo, $user);
 }
+if ($method === 'POST' && preg_match('#^/sales/(\d+)/reverse$#', $path, $m)) {
+    PosCustomerDebtController::reverseSale($pdo, $user, (int) $m[1]);
+}
 
 // Customers
 if ($method === 'GET' && $path === '/customers') {

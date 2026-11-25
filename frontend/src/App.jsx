@@ -565,6 +565,7 @@ export default function App() {
       case 'sales':
         return (
           <SalesHistoryScreen
+            user={user}
             onNavigate={setActiveScreen}
             onSelectSale={(id) => {
               setSelectedSaleId(id);
@@ -575,6 +576,7 @@ export default function App() {
       case 'sale_details':
         return (
           <SaleDetailsScreen
+            user={user}
             saleId={selectedSaleId}
             onBack={() => setActiveScreen('sales')}
             onNewSale={() => setActiveScreen('pos')}

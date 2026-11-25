@@ -22,6 +22,7 @@ import {
   enqueueOfflineTransaction,
   fetchProductsWithOfflineFallback,
   getAllFromStore,
+  refreshOfflineBootstrap,
   resolveMediaUrl,
 } from '../services/api';
 import {
@@ -1564,14 +1565,20 @@ export function PosScreen({ user, settings, isOffline, onQueueUpdated, onViewSal
 // ============================================================================
 // SCREEN 4: SALES HISTORY
 // ============================================================================
-export function SalesHistoryScreen({ onSelectSale, onNavigate }) {
+export function SalesHistoryScreen({ user, onSelectSale, onNavigate }) {
   const { t } = useLanguage();
+  const isAdmin = (user?.role_slugs || []).includes('owner');
+  const canReverseSale = isAdmin && hasPermission(user, 'sales.reverse');
   const [sales, setSales] = useState([]);
   const [search, setSearch] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(true);
+  const [reversingSale, setReversingSale] = useState(null);
+  const [reverseReason, setReverseReason] = useState('');
+  const [reversingBusy, setReversingBusy] = useState(false);
+  const [historyNotice, setHistoryNotice] = useState(null);
 
   const loadSales = async () => {
     setLoading(true);
@@ -1594,6 +1601,30 @@ export function SalesHistoryScreen({ onSelectSale, onNavigate }) {
     loadSales();
   }, [paymentStatus, startDate, endDate]);
 
+  const handleConfirmReverse = async (e) => {
+    e.preventDefault();
+    if (!reversingSale) return;
+    setReversingBusy(true);
+    setHistoryNotice(null);
+    try {
+      const res = await apiRequest(`/sales/${reversingSale.id}/reverse`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: reverseReason.trim() || 'Reversed by Admin and product returned to stock',
+        }),
+      });
+      await refreshOfflineBootstrap().catch(() => {});
+      setReversingSale(null);
+      setReverseReason('');
+      setHistoryNotice({ type: 'success', text: res.message, items: res.restored_items || [] });
+      await loadSales();
+    } catch (err) {
+      setHistoryNotice({ type: 'error', text: err.message });
+    } finally {
+      setReversingBusy(false);
+    }
+  };
+
   const salesPg = usePagination(
     sales,
     5,
@@ -1615,6 +1646,30 @@ export function SalesHistoryScreen({ onSelectSale, onNavigate }) {
           {t('+ New POS Sale')}
         </button>
       </div>
+
+      {historyNotice && (
+        <div
+          className={`p-3.5 rounded-2xl border text-xs font-semibold space-y-1.5 ${
+            historyNotice.type === 'error'
+              ? 'bg-red-50 border-red-200 text-red-700'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
+        >
+          <p>{t(historyNotice.text)}</p>
+          {Array.isArray(historyNotice.items) && historyNotice.items.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {historyNotice.items.map((ri) => (
+                <span
+                  key={ri.product_id}
+                  className="px-2 py-0.5 rounded-lg bg-white border border-emerald-200 text-[11px] font-bold text-emerald-800"
+                >
+                  {ri.product_name}: {ri.previous_quantity} → {ri.new_quantity} (+{ri.restored_quantity})
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center gap-3">
@@ -1730,13 +1785,28 @@ export function SalesHistoryScreen({ onSelectSale, onNavigate }) {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <button
-                        type="button"
-                        onClick={() => onSelectSale(s.id)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> {t('View')}
-                      </button>
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onSelectSale(s.id)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> {t('View')}
+                        </button>
+                        {canReverseSale && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReversingSale(s);
+                              setReverseReason('');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs"
+                            title={t('Reverse Sale & Return Stock')}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> {t('Reverse')}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -1746,6 +1816,69 @@ export function SalesHistoryScreen({ onSelectSale, onNavigate }) {
         </div>
         {!loading && <Pagination {...salesPg.paginationProps} />}
       </div>
+
+      {/* Admin Sale Reversal Confirmation Modal */}
+      {reversingSale && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <form
+            onSubmit={handleConfirmReverse}
+            className="bg-white rounded-2xl border border-red-200 shadow-xl max-w-md w-full p-5 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-extrabold text-red-700">
+                  {t('Reverse Sale & Return Stock')}
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  {t('Receipt {ref} · {amount}', {
+                    ref: reversingSale.receipt_number,
+                    amount: formatTZS(reversingSale.total_amount),
+                  })}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReversingSale(null)}
+                className="p-1 text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-600 bg-red-50 border border-red-200 rounded-xl p-3">
+              {t('This will permanently delete this sale record, return all sold product quantities back into inventory stock, and adjust cash/debt balances back to before the sale.')}
+            </p>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                {t('Reason (Optional)')}
+              </label>
+              <input
+                type="text"
+                value={reverseReason}
+                onChange={(e) => setReverseReason(e.target.value)}
+                placeholder={t('e.g. Test sale or cashier mistake')}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setReversingSale(null)}
+                className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700"
+              >
+                {t('Cancel')}
+              </button>
+              <button
+                type="submit"
+                disabled={reversingBusy}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs font-extrabold shadow-sm"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                {reversingBusy ? t('Reversing...') : t('Confirm Reverse & Return Stock')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -1753,11 +1886,17 @@ export function SalesHistoryScreen({ onSelectSale, onNavigate }) {
 // ============================================================================
 // SCREEN 5: SALE DETAILS & RECEIPT VIEW
 // ============================================================================
-export function SaleDetailsScreen({ saleId, onBack, onNewSale }) {
+export function SaleDetailsScreen({ user, saleId, onBack, onNewSale }) {
   const { t } = useLanguage();
+  const isAdmin = (user?.role_slugs || []).includes('owner');
+  const canReverseSale = isAdmin && hasPermission(user, 'sales.reverse');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [showReverseModal, setShowReverseModal] = useState(false);
+  const [reverseReason, setReverseReason] = useState('');
+  const [reversingBusy, setReversingBusy] = useState(false);
+  const [reverseError, setReverseError] = useState(null);
 
   useEffect(() => {
     if (!saleId) return;
@@ -1791,6 +1930,27 @@ export function SaleDetailsScreen({ saleId, onBack, onNewSale }) {
     openWhatsAppPaymentReceipt(receiptBundle, t);
   };
 
+  const handleConfirmReverseDetail = async (e) => {
+    e.preventDefault();
+    setReversingBusy(true);
+    setReverseError(null);
+    try {
+      await apiRequest(`/sales/${sale.id}/reverse`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: reverseReason.trim() || 'Reversed by Admin and product returned to stock',
+        }),
+      });
+      await refreshOfflineBootstrap().catch(() => {});
+      setShowReverseModal(false);
+      onBack?.();
+    } catch (err) {
+      setReverseError(err.message);
+    } finally {
+      setReversingBusy(false);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1802,6 +1962,19 @@ export function SaleDetailsScreen({ saleId, onBack, onNewSale }) {
           {t('← Back to Sales History')}
         </button>
         <div className="flex flex-wrap items-center gap-2">
+          {canReverseSale && (
+            <button
+              type="button"
+              onClick={() => {
+                setReverseError(null);
+                setReverseReason('');
+                setShowReverseModal(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-xs font-bold text-red-700"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> {t('Reverse Sale & Return Stock')}
+            </button>
+          )}
           <button
             type="button"
             onClick={handlePrintReceipt}
@@ -1971,6 +2144,73 @@ export function SaleDetailsScreen({ saleId, onBack, onNewSale }) {
           </div>
         </div>
       </div>
+
+      {showReverseModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <form
+            onSubmit={handleConfirmReverseDetail}
+            className="bg-white rounded-2xl border border-red-200 shadow-xl max-w-md w-full p-5 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-extrabold text-red-700">
+                  {t('Reverse Sale & Return Stock')}
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  {t('Receipt {ref} · {amount}', {
+                    ref: sale.receipt_number,
+                    amount: formatTZS(sale.total_amount),
+                  })}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReverseModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {reverseError && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700">
+                {t(reverseError)}
+              </div>
+            )}
+            <p className="text-xs text-slate-600 bg-red-50 border border-red-200 rounded-xl p-3">
+              {t('This will permanently delete this sale record, return all sold product quantities back into inventory stock, and adjust cash/debt balances back to before the sale.')}
+            </p>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                {t('Reason (Optional)')}
+              </label>
+              <input
+                type="text"
+                value={reverseReason}
+                onChange={(e) => setReverseReason(e.target.value)}
+                placeholder={t('e.g. Test sale or cashier mistake')}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowReverseModal(false)}
+                className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700"
+              >
+                {t('Cancel')}
+              </button>
+              <button
+                type="submit"
+                disabled={reversingBusy}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs font-extrabold shadow-sm"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                {reversingBusy ? t('Reversing...') : t('Confirm Reverse & Return Stock')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

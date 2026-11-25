@@ -88,6 +88,7 @@ const EN_KEY_LABELS = {
   'return.processed': 'Return Processed',
   'sale.credit_created': 'Credit Sale Created',
   'sale.discount_applied': 'Sale Discount Applied',
+  'sale.reversed': 'Sale Reversed & Restocked',
   'settings.updated': 'Settings Updated',
   'supplier.created': 'Supplier Registered',
   'supplier.updated': 'Supplier Updated',
@@ -1710,6 +1711,18 @@ export const SW_DICTIONARY = {
   '{count} Sockets': 'Matundu {count}',
   '{count}-Way': 'Matundu {count}',
   'Image is too large after compression (max 8MB).': 'Picha ni kubwa mno hata baada ya kupunguzwa ukubwa (kiwango cha juu ni 8MB).',
+
+  // Sale Reversal & Stock Restoration (Admin)
+  'Sale Reversed & Restocked': 'Mauzo Yamefutwa na Hisa Kurudishwa',
+  'Reverse': 'Futa / Rudisha',
+  'Reversing...': 'Inarudisha...',
+  'Reverse Sale & Return Stock': 'Futa Mauzo & Rudisha Bidhaa',
+  'Confirm Reverse & Return Stock': 'Thibitisha Kufuta & Kurudisha Hisa',
+  'Receipt {ref} · {amount}': 'Risiti {ref} · {amount}',
+  'This will permanently delete this sale record, return all sold product quantities back into inventory stock, and adjust cash/debt balances back to before the sale.': 'Hatua hii itafuta kumbukumbu ya mauzo haya, kurudisha bidhaa zote zilizouzwa kwenye hisa ya ghala, na kurekebisha hesabu za fedha na madeni kurudi kama kabla ya mauzo.',
+  'Reason (Optional)': 'Sababu (Hiari)',
+  'e.g. Test sale or cashier mistake': 'mf. Mauzo ya majaribio au kosa la mauzo',
+  'Access denied: Only the Shop Admin can reverse sales and restore stock.': 'Ufikiaji umezuiwa: Msimamizi wa Duka pekee ndiye anayeweza kufuta mauzo na kurudisha hisa.',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY
@@ -1733,6 +1746,9 @@ function translateDynamicSw(text) {
 
   if ((m = text.match(/^Sale\s+(.+?)\s+completed successfully\.?$/i))) {
     return `Mauzo ${m[1]} yamekamilika kikamilifu.`;
+  }
+  if ((m = text.match(/^Sale\s+(.+?)\s+reversed and product stock restored successfully\.?$/i))) {
+    return `Mauzo ${m[1]} yamefutwa na bidhaa zimerudishwa kwenye hisa kikamilifu.`;
   }
   if ((m = text.match(/^Sale\s+(.+?)\s+is already fully paid\.?$/i))) {
     return `Mauzo ${m[1]} tayari yamelipwa kikamilifu.`;

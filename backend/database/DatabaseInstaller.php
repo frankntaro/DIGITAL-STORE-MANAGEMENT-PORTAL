@@ -7,8 +7,9 @@ use PDOException;
 
 class DatabaseInstaller
 {
-    private const SCHEMA_VERSION = '2026.11.25.persistent-media-storage-v1';
+    private const SCHEMA_VERSION = '2026.11.25.revert-test-sales-and-sale-reversal-v1';
     private const PURGE_DEMO_MIGRATION = '2026_11_25_purge_demo_data_v1';
+    private const REVERT_TEST_SALES_MIGRATION = '2026_11_25_revert_test_sales_v1';
     private static ?array $cachedConfig = null;
     private static bool $dbJustCreated = false;
 
@@ -567,6 +568,15 @@ class DatabaseInstaller
                     ->execute([self::PURGE_DEMO_MIGRATION]);
             }
 
+            // One-time surgical reversal of test sales: returns sold stock back to inventories while preserving ALL products, images, categories & accounts
+            $revertChk = $pdo->prepare("SELECT COUNT(*) FROM `system_migrations` WHERE `migration_key` = ?");
+            $revertChk->execute([self::REVERT_TEST_SALES_MIGRATION]);
+            if ((int) $revertChk->fetchColumn() === 0) {
+                self::revertRecordedTestSalesAndRestock($pdo);
+                $pdo->prepare("INSERT IGNORE INTO `system_migrations` (`migration_key`) VALUES (?)")
+                    ->execute([self::REVERT_TEST_SALES_MIGRATION]);
+            }
+
             // Ensure clean KAMPANGO PHONES AND ELECTRONICS categories remain intact (zero demo products)
             ShopCatalogSeeder::syncCatalog($pdo);
 
@@ -588,6 +598,96 @@ class DatabaseInstaller
             }
         } catch (\Throwable $e) {
             // Silently continue if tables are still initializing
+        }
+    }
+
+    /**
+     * Surgically reverts recorded test sales, returning all sold product quantities back into
+     * inventories and recalculating cash sessions, while strictly preserving all products,
+     * uploaded images, categories, suppliers, purchases, employees, and shop settings.
+     */
+    public static function revertRecordedTestSalesAndRestock(PDO $pdo): void
+    {
+        $salesCount = (int) $pdo->query("SELECT COUNT(*) FROM `sales`")->fetchColumn();
+        if ($salesCount === 0) {
+            return;
+        }
+
+        // 1. Return every non-returned sold quantity back into available inventory
+        $soldItems = $pdo->query("
+            SELECT si.`product_id`,
+                   SUM(GREATEST(0, si.`quantity` - COALESCE(si.`returned_quantity`, 0))) AS restore_qty
+            FROM `sale_items` si
+            INNER JOIN `sales` s ON s.`id` = si.`sale_id`
+            WHERE s.`status` != 'cancelled'
+            GROUP BY si.`product_id`
+        ")->fetchAll();
+
+        $restockStmt = $pdo->prepare("
+            UPDATE `inventories`
+            SET `available_quantity` = ROUND(`available_quantity` + ?, 2),
+                `last_counted_at` = NOW()
+            WHERE `product_id` = ?
+        ");
+        foreach ($soldItems as $row) {
+            $qty = round((float) ($row['restore_qty'] ?? 0), 2);
+            $pid = (int) ($row['product_id'] ?? 0);
+            if ($pid > 0 && $qty > 0.001) {
+                $restockStmt->execute([$qty, $pid]);
+            }
+        }
+
+        // 2. Collect cash sessions touched by sale-related movements so we can recalculate them cleanly
+        $affectedSessions = array_map(
+            'intval',
+            $pdo->query("
+                SELECT DISTINCT `cash_session_id`
+                FROM `cash_movements`
+                WHERE `reference_type` IN ('Sale', 'CustomerPayment', 'Return')
+                  AND `cash_session_id` IS NOT NULL
+            ")->fetchAll(PDO::FETCH_COLUMN)
+        );
+
+        // 3. Remove ONLY test sale records and their direct dependents
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+        try {
+            $saleTables = [
+                'warranty_claims',
+                'warranties',
+                'return_items',
+                'returns',
+                'customer_payments',
+                'sale_items',
+                'sales',
+            ];
+            foreach ($saleTables as $tbl) {
+                $exists = $pdo->query("SHOW TABLES LIKE '{$tbl}'")->fetchAll();
+                if (!empty($exists)) {
+                    $pdo->exec("DELETE FROM `{$tbl}`");
+                    try {
+                        $pdo->exec("ALTER TABLE `{$tbl}` AUTO_INCREMENT = 1");
+                    } catch (\Throwable $ignored) {
+                    }
+                }
+            }
+
+            $pdo->exec("DELETE FROM `cash_movements` WHERE `reference_type` IN ('Sale', 'CustomerPayment', 'Return')");
+            $pdo->exec("DELETE FROM `stock_movements` WHERE `reference_type` IN ('Sale', 'Return')");
+            $pdo->exec("DELETE FROM `audit_logs` WHERE `entity_type` IN ('Sale', 'CustomerPayment', 'Return', 'Warranty')");
+
+            $hasNotif = $pdo->query("SHOW TABLES LIKE 'admin_notifications'")->fetchAll();
+            if (!empty($hasNotif)) {
+                $pdo->exec("DELETE FROM `admin_notifications` WHERE `type` IN ('employee_sale', 'sold_out')");
+            }
+        } finally {
+            $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+        }
+
+        // 4. Recalculate any affected cash register sessions
+        foreach ($affectedSessions as $sid) {
+            if ($sid > 0) {
+                \App\Services\FinancialService::recalculateCashSession($pdo, $sid);
+            }
         }
     }
 
@@ -821,9 +921,10 @@ class DatabaseInstaller
             // 5. Seed Clean Shop Categories ONLY (Zero demonstration products, customers, suppliers, or sales)
             ShopCatalogSeeder::syncCatalog($pdo);
 
-            // Mark demo-purge migration complete on fresh clean installs
-            $pdo->prepare("INSERT IGNORE INTO `system_migrations` (`migration_key`) VALUES (?)")
-                ->execute([self::PURGE_DEMO_MIGRATION]);
+            // Mark one-time cleanup migrations complete on fresh clean installs
+            $migStmt = $pdo->prepare("INSERT IGNORE INTO `system_migrations` (`migration_key`) VALUES (?)");
+            $migStmt->execute([self::PURGE_DEMO_MIGRATION]);
+            $migStmt->execute([self::REVERT_TEST_SALES_MIGRATION]);
 
             if ($pdo->inTransaction()) {
                 $pdo->commit();
