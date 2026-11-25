@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
   ArrowRightLeft,
   Boxes,
+  Camera,
   Check,
   CheckCircle2,
   Clock,
@@ -620,6 +621,12 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
   const [uploadStatus, setUploadStatus] = useState(null);
   const [selectedFileName, setSelectedFileName] = useState('');
   const [localPreviewUrl, setLocalPreviewUrl] = useState('');
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState('environment');
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
   const [useBoxPackaging, setUseBoxPackaging] = useState(
     Boolean(editingProduct?.box_count || editingProduct?.items_per_box)
   );
@@ -700,10 +707,90 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
     });
   }, []);
 
-  const handleDeviceImageUpload = async (e) => {
-    const file = e.target.files?.[0];
-    // Reset input value so selecting the same file again still triggers onChange
-    e.target.value = '';
+  const stopLiveCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((tr) => {
+        try {
+          tr.stop();
+        } catch {
+          // ignore
+        }
+      });
+      cameraStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraActive(false);
+    setCameraStarting(false);
+  };
+
+  useEffect(() => () => stopLiveCamera(), []);
+
+  useEffect(() => {
+    if (cameraActive && videoRef.current && cameraStreamRef.current) {
+      videoRef.current.srcObject = cameraStreamRef.current;
+      videoRef.current.play?.().catch(() => {});
+    }
+  }, [cameraActive]);
+
+  const startLiveCamera = async (desiredFacing = cameraFacing) => {
+    setCameraError('');
+    setUploadStatus(null);
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.getUserMedia !== 'function'
+    ) {
+      setCameraError(
+        t('Live browser camera is not available here. Please use "Use Phone Camera App" below.')
+      );
+      return;
+    }
+
+    stopLiveCamera();
+    setCameraStarting(true);
+    try {
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: desiredFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 1280 },
+          },
+          audio: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      cameraStreamRef.current = stream;
+      setCameraFacing(desiredFacing);
+      setCameraActive(true);
+    } catch (err) {
+      const name = err?.name || '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        setCameraError(
+          t('Camera permission was denied. Allow camera access in your browser or use "Use Phone Camera App" below.')
+        );
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        setCameraError(t('No camera was detected on this device.'));
+      } else {
+        setCameraError(
+          t('Could not start live camera. Try "Use Phone Camera App" below.')
+        );
+      }
+    } finally {
+      setCameraStarting(false);
+    }
+  };
+
+  const handleSwitchCamera = () => {
+    const nextFacing = cameraFacing === 'environment' ? 'user' : 'environment';
+    startLiveCamera(nextFacing);
+  };
+
+  const processAndUploadImageFile = async (file) => {
     if (!file) return;
 
     const validExt = /\.(jpe?g|png|webp|gif|svg|bmp|avif)$/i.test(file.name || '');
@@ -725,6 +812,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
     setSelectedFileName(file.name);
     setUploadingImage(true);
     setUploadStatus(null);
+    setCameraError('');
     setError(null);
 
     try {
@@ -776,6 +864,55 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
     } finally {
       setUploadingImage(false);
     }
+  };
+
+  const handleDeviceImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    // Reset input value so selecting the same file again still triggers onChange
+    e.target.value = '';
+    if (!file) return;
+    stopLiveCamera();
+    await processAndUploadImageFile(file);
+  };
+
+  const handleCaptureFromCamera = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setCameraError(t('Camera is still focusing. Please try capturing again.'));
+      return;
+    }
+
+    const maxDim = 960;
+    let w = video.videoWidth;
+    let h = video.videoHeight;
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    w = Math.max(1, Math.round(w * scale));
+    h = Math.max(1, Math.round(h * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(video, 0, 0, w, h);
+
+    stopLiveCamera();
+
+    canvas.toBlob(
+      async (blob) => {
+        if (!blob) {
+          setCameraError(t('Failed to capture photo from camera. Please try again.'));
+          return;
+        }
+        const photoFile = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' });
+        await processAndUploadImageFile(photoFile);
+      },
+      'image/jpeg',
+      0.86
+    );
   };
 
   const isAdmin = (user?.role_slugs || []).includes('owner');
@@ -851,6 +988,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (uploadingImage) return;
+    stopLiveCamera();
     setSaving(true);
     setError(null);
     const includeBoxes = isStorageMediaCategory || useBoxPackaging;
@@ -917,11 +1055,44 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
         onSubmit={handleSubmit}
         className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm grid grid-cols-1 md:grid-cols-12 gap-6"
       >
-        {/* Left Image Column: Dual Mode (From Device & HTTPS URL) */}
+        {/* Left Image Column: Triple Mode (From Device, Take Photo Directly & HTTPS URL) */}
         <div className="md:col-span-4 space-y-3">
           <label className="block text-xs font-bold text-slate-700">{t('Product Image')}</label>
           <div className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center p-2 relative group">
-            {previewSrc ? (
+            {cameraActive ? (
+              <div className="w-full h-full relative rounded-xl overflow-hidden bg-slate-950">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover block"
+                />
+                <button
+                  type="button"
+                  onClick={handleSwitchCamera}
+                  className="absolute top-2.5 left-2.5 px-2.5 py-1.5 rounded-full bg-slate-900/75 hover:bg-slate-900 text-white text-[10px] font-bold inline-flex items-center gap-1 shadow"
+                  title={t('Switch Camera')}
+                >
+                  <RefreshCw className="w-3 h-3" /> {t('Flip')}
+                </button>
+                <button
+                  type="button"
+                  onClick={stopLiveCamera}
+                  className="absolute top-2.5 right-2.5 p-1.5 rounded-full bg-red-600/90 hover:bg-red-700 text-white shadow"
+                  title={t('Close Camera')}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCaptureFromCamera}
+                  className="absolute bottom-3 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-lg inline-flex items-center gap-1.5 border-2 border-white"
+                >
+                  <Camera className="w-4 h-4" /> {t('Capture Photo')}
+                </button>
+              </div>
+            ) : previewSrc ? (
               <img
                 key={previewSrc}
                 src={previewSrc}
@@ -946,7 +1117,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
                 </span>
               </div>
             )}
-            {previewSrc && !uploadingImage && (
+            {previewSrc && !uploadingImage && !cameraActive && (
               <button
                 type="button"
                 onClick={() => {
@@ -963,29 +1134,54 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
             )}
           </div>
 
-          {/* Toggle between Upload from Device and HTTPS URL */}
-          <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
+          {/* Toggle between Upload from Device, Take Photo (Camera) and HTTPS URL */}
+          <div className="grid grid-cols-3 rounded-xl bg-slate-100 p-1 text-[11px] font-bold gap-1">
             <button
               type="button"
-              onClick={() => setImageSource('device')}
-              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition ${
+              onClick={() => {
+                stopLiveCamera();
+                setCameraError('');
+                setImageSource('device');
+              }}
+              className={`py-1.5 px-1.5 rounded-lg flex items-center justify-center gap-1 transition ${
                 imageSource === 'device'
                   ? 'bg-white text-blue-600 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <UploadCloud className="w-3.5 h-3.5" /> {t('From Device')}
+              <UploadCloud className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t('From Device')}</span>
             </button>
             <button
               type="button"
-              onClick={() => setImageSource('url')}
-              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition ${
+              onClick={() => {
+                setCameraError('');
+                setImageSource('camera');
+              }}
+              className={`py-1.5 px-1.5 rounded-lg flex items-center justify-center gap-1 transition ${
+                imageSource === 'camera'
+                  ? 'bg-white text-emerald-700 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t('Take Photo')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                stopLiveCamera();
+                setCameraError('');
+                setImageSource('url');
+              }}
+              className={`py-1.5 px-1.5 rounded-lg flex items-center justify-center gap-1 transition ${
                 imageSource === 'url'
                   ? 'bg-white text-blue-600 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Globe className="w-3.5 h-3.5" /> {t('HTTPS Link')}
+              <Globe className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t('HTTPS Link')}</span>
             </button>
           </div>
 
@@ -1025,6 +1221,82 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
                     {t('✓ Selected: {file}', { file: selectedFileName })}
                   </p>
                 )
+              )}
+            </div>
+          ) : imageSource === 'camera' ? (
+            <div className="space-y-2">
+              {!cameraActive ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={uploadingImage || cameraStarting}
+                    onClick={() => startLiveCamera('environment')}
+                    className="w-full py-2.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-extrabold shadow-sm flex items-center justify-center gap-2 transition"
+                  >
+                    <Camera className="w-4 h-4" />
+                    {cameraStarting ? t('Starting camera...') : t('Open Live Camera')}
+                  </button>
+
+                  <label
+                    htmlFor="native-camera-capture"
+                    className={`w-full border-2 border-dashed border-emerald-300 hover:border-emerald-500 bg-emerald-50/60 hover:bg-emerald-50 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer transition text-center ${
+                      uploadingImage ? 'opacity-60 pointer-events-none' : ''
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-emerald-800">
+                      {uploadingImage ? t('Uploading image...') : t('Use Phone Camera App')}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {t('Snap directly with rear camera & flash')}
+                    </span>
+                    <input
+                      id="native-camera-capture"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      disabled={uploadingImage}
+                      onChange={handleDeviceImageUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCaptureFromCamera}
+                    className="col-span-2 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm flex items-center justify-center gap-1.5"
+                  >
+                    <Camera className="w-4 h-4" /> {t('Capture Photo')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSwitchCamera}
+                    className="py-2 px-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> {t('Switch Camera')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopLiveCamera}
+                    className="py-2 px-3 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold flex items-center justify-center gap-1.5"
+                  >
+                    <X className="w-3.5 h-3.5" /> {t('Close Camera')}
+                  </button>
+                </div>
+              )}
+
+              {cameraError && (
+                <p className="text-[11px] font-semibold text-red-600 break-words">{cameraError}</p>
+              )}
+              {uploadStatus && (
+                <p
+                  className={`text-[11px] font-semibold break-words ${
+                    uploadStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'
+                  }`}
+                >
+                  {uploadStatus.text}
+                </p>
               )}
             </div>
           ) : (

@@ -1723,6 +1723,23 @@ export const SW_DICTIONARY = {
   'Reason (Optional)': 'Sababu (Hiari)',
   'e.g. Test sale or cashier mistake': 'mf. Mauzo ya majaribio au kosa la mauzo',
   'Access denied: Only the Shop Admin can reverse sales and restore stock.': 'Ufikiaji umezuiwa: Msimamizi wa Duka pekee ndiye anayeweza kufuta mauzo na kurudisha hisa.',
+
+  // Direct Camera Photo Capture for Products
+  'Take Photo': 'Piga Picha',
+  'Open Live Camera': 'Washa Kamera Moja Kwa Moja',
+  'Starting camera...': 'Inawasha kamera...',
+  'Capture Photo': 'Piga Picha Sasa',
+  'Switch Camera': 'Badili Kamera',
+  'Flip': 'Geuza',
+  'Close Camera': 'Funga Kamera',
+  'Use Phone Camera App': 'Tumia Kamera ya Simu',
+  'Snap directly with rear camera & flash': 'Piga picha moja kwa moja kwa kamera ya nyuma na flash',
+  'Live browser camera is not available here. Please use "Use Phone Camera App" below.': 'Kamera ya moja kwa moja ya kivinjari haipatikani hapa. Tafadhali tumia "Tumia Kamera ya Simu" hapa chini.',
+  'Camera permission was denied. Allow camera access in your browser or use "Use Phone Camera App" below.': 'Ruhusa ya kamera imekataliwa. Ruhusu kamera kwenye kivinjari chako au tumia "Tumia Kamera ya Simu" hapa chini.',
+  'No camera was detected on this device.': 'Hakuna kamera iliyopatikana kwenye kifaa hiki.',
+  'Could not start live camera. Try "Use Phone Camera App" below.': 'Imeshindikana kuwasha kamera moja kwa moja. Jaribu "Tumia Kamera ya Simu" hapa chini.',
+  'Camera is still focusing. Please try capturing again.': 'Kamera bado inajipanga. Tafadhali jaribu kupiga picha tena.',
+  'Failed to capture photo from camera. Please try again.': 'Imeshindikana kupiga picha kutoka kwenye kamera. Tafadhali jaribu tena.',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY
