@@ -28,6 +28,7 @@ import {
   Smartphone,
   Trash2,
   Truck,
+  Tv,
   UploadCloud,
   X,
   XCircle,
@@ -55,18 +56,25 @@ import Pagination, { usePagination } from '../components/Pagination';
 const RAM_PRESETS = ['2GB', '3GB', '4GB', '6GB', '8GB', '12GB', '16GB'];
 const PHONE_STORAGE_PRESETS = ['32GB', '64GB', '128GB', '256GB', '512GB', '1TB'];
 const MEDIA_STORAGE_PRESETS = ['2GB', '4GB', '8GB', '16GB', '32GB', '64GB', '128GB', '256GB', '512GB', '1TB'];
+const TV_INCH_PRESETS = ['19"', '24"', '32"', '40"', '43"', '50"', '55"', '65"', '75"', '85"'];
 
 function ProductSpecBadges({ product, t }) {
   const hasRam = Boolean(product?.ram_gb);
   const hasStorage = Boolean(product?.storage_gb);
+  const hasTvSize = Boolean(product?.tv_size_inches);
   const boxCount = Number(product?.box_count || 0);
   const itemsPerBox = Number(product?.items_per_box || 0);
   const hasBoxes = boxCount > 0 || itemsPerBox > 0;
 
-  if (!hasRam && !hasStorage && !hasBoxes) return null;
+  if (!hasRam && !hasStorage && !hasTvSize && !hasBoxes) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1 mt-1">
+      {hasTvSize && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-teal-100 text-teal-800">
+          {t('TV {size}', { size: product.tv_size_inches })}
+        </span>
+      )}
       {hasRam && hasStorage ? (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-violet-100 text-violet-800">
           {product.ram_gb} RAM / {product.storage_gb} ROM
@@ -602,6 +610,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
     model: editingProduct?.model || '',
     ram_gb: editingProduct?.ram_gb || '',
     storage_gb: editingProduct?.storage_gb || '',
+    tv_size_inches: editingProduct?.tv_size_inches || '',
     box_count: editingProduct?.box_count ?? '',
     items_per_box: editingProduct?.items_per_box ?? '',
     sku: editingProduct?.sku || '',
@@ -633,6 +642,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
       model: editingProduct?.model || '',
       ram_gb: editingProduct?.ram_gb || '',
       storage_gb: editingProduct?.storage_gb || '',
+      tv_size_inches: editingProduct?.tv_size_inches || '',
       box_count: editingProduct?.box_count ?? '',
       items_per_box: editingProduct?.items_per_box ?? '',
       sku: editingProduct?.sku || '',
@@ -791,6 +801,14 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
     catSlug === 'memory-cards-and-flash-drives' ||
     catName.includes('flash') ||
     catName.includes('memory card');
+  const isTvRemoteCategory =
+    catSlug === 'tv-remotes' || catName.includes('remote') || catName.includes('rimoti');
+  const isTvCategory =
+    !isTvRemoteCategory &&
+    (catSlug === 'tv' ||
+      catSlug === 'tvs' ||
+      catSlug === 'tvs-and-remotes' ||
+      /\btv\b|\btvs\b|runinga|television/i.test(catName));
 
   const updateBoxField = (field, rawValue) => {
     setForm((prev) => {
@@ -815,6 +833,7 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
       available_quantity: form.initial_quantity,
       ram_gb: isSmartphoneCategory ? form.ram_gb : '',
       storage_gb: isSmartphoneCategory || isStorageMediaCategory ? form.storage_gb : '',
+      tv_size_inches: isTvCategory ? form.tv_size_inches : '',
       box_count: includeBoxes ? form.box_count : '',
       items_per_box: includeBoxes ? form.items_per_box : '',
     };
@@ -1229,6 +1248,54 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
               <p className="text-[11px] text-cyan-800">
                 {t('Tip: Entering Number of Boxes and items per box automatically calculates the total stock quantity below (you can still adjust stock manually).')}
               </p>
+            </div>
+          )}
+
+          {/* Dynamic Category Specifications: TV (Screen Size in Inches) */}
+          {isTvCategory && (
+            <div className="sm:col-span-2 rounded-2xl border border-teal-200 bg-teal-50/70 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Tv className="w-4 h-4 text-teal-700" />
+                  <span className="text-xs font-extrabold text-teal-900">
+                    {t('TV Specifications (Screen Size / Inches)')}
+                  </span>
+                </div>
+                {form.tv_size_inches && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-teal-700 text-white text-[10px] font-extrabold">
+                    {t('TV {size}', { size: form.tv_size_inches })}
+                  </span>
+                )}
+              </div>
+              <div>
+                <label htmlFor="prod-tv-size" className="block text-[11px] font-bold text-teal-900 mb-1">
+                  {t('TV Screen Size (Inches)')}
+                </label>
+                <input
+                  id="prod-tv-size"
+                  type="text"
+                  value={form.tv_size_inches}
+                  onChange={(e) => setForm({ ...form, tv_size_inches: e.target.value })}
+                  placeholder={t('e.g. 24", 32", 43", 55", 65"')}
+                  className="w-full px-3 py-2 rounded-xl border border-teal-300 bg-white text-xs font-semibold"
+                />
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {TV_INCH_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setForm({ ...form, tv_size_inches: preset })}
+                      className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold border transition ${
+                        String(form.tv_size_inches).trim() === preset
+                          ? 'bg-teal-700 text-white border-teal-700'
+                          : 'bg-white text-teal-900 border-teal-200 hover:bg-teal-100'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 

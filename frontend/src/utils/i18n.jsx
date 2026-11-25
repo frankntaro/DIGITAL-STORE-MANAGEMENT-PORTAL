@@ -1690,6 +1690,16 @@ export const SW_DICTIONARY = {
   'Missing order item record not found.': 'Kumbukumbu ya bidhaa iliyokosekana haikupatikana.',
   'This missing item has already been resolved.': 'Bidhaa hii iliyokosekana tayari imeshatatuliwa.',
   'At least one product must have received or missing quantity to process this order.': 'Angalau bidhaa moja lazima iwe na kiasi kilichofika au kilichokosekana ili kushughulikia agizo hili.',
+
+  // TV Category & Screen Size (Inches)
+  'TV': 'TV (Runinga)',
+  'TV Remotes': 'Rimoti za TV',
+  'Smart TVs, LED TVs, Solar TVs, and Digital Televisions with screen size (inches)': 'Smart TV, LED TV, Solar TV na runinga za kidijitali zenye ukubwa wa inchi',
+  'Television remotes, decoders, and TV mounting accessories': 'Rimoti za TV, ving\'amuzi na vifaa vya kufungia TV',
+  'TV Specifications (Screen Size / Inches)': 'Vipimo vya TV (Ukubwa wa Inchi)',
+  'TV Screen Size (Inches)': 'TV Inchi Ngapi? (Ukubwa wa Skrini)',
+  'e.g. 24", 32", 43", 55", 65"': 'mf. Inchi 24", 32", 43", 55", 65"',
+  'TV {size}': 'TV {size}',
 };
 
 // Build case-insensitive lookup map for SW_DICTIONARY

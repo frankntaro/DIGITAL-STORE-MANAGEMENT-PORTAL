@@ -23,7 +23,8 @@ class ShopCatalogSeeder
             ['Tablets', 'tablets', 'Tablet', 'iPads, Android tablets, and educational slates', 1],
             ['Smartwatches', 'smartwatches', 'Watch', 'Fitness trackers and smartwatches', 1],
             ['Memory Cards and Flash Drives', 'memory-cards-and-flash-drives', 'HardDrive', 'Memory cards, USB flash drives, and pen drives with storage capacity and box packaging', 1],
-            ['TVs & Remotes', 'tvs-and-remotes', 'Tv', 'Smart & LED TVs, solar TVs, and remotes', 1],
+            ['TV', 'tv', 'Tv', 'Smart TVs, LED TVs, Solar TVs, and Digital Televisions with screen size (inches)', 1],
+            ['TV Remotes', 'tv-remotes', 'Tv', 'Television remotes, decoders, and TV mounting accessories', 1],
             ['Fridges & Freezers', 'fridges-and-freezers', 'Snowflake', 'Fridges, freezers, and fridge guards', 1],
             ['Solar, Batteries & Power', 'solar-and-power', 'Sun', 'Solar batteries, solar controllers, inverters, and voltage regulators', 1],
             ['Home Appliances & Kitchen', 'home-appliances', 'Flame', 'Rice cookers, water dispensers, fryers, gas cookers, fans, irons, kettles, and flasks', 1],
@@ -82,6 +83,32 @@ class ShopCatalogSeeder
             $remaining = (int) $pdo->query("SELECT COUNT(*) FROM `products` WHERE `category_id` = {$legacyMobileCatId}")->fetchColumn();
             if ($remaining === 0) {
                 $pdo->exec("DELETE FROM `categories` WHERE `id` = {$legacyMobileCatId}");
+            }
+        }
+
+        // Safely migrate any products from legacy combined 'tvs-and-remotes' into dedicated 'tv' and 'tv-remotes' categories
+        $findCat->execute(['tvs-and-remotes']);
+        $legacyTvCatId = (int) $findCat->fetchColumn();
+        if ($legacyTvCatId > 0) {
+            $legacyTvProds = $pdo->prepare("SELECT `id`, `name` FROM `products` WHERE `category_id` = ?");
+            $legacyTvProds->execute([$legacyTvCatId]);
+            $updateTvProdCat = $pdo->prepare("UPDATE `products` SET `category_id` = ? WHERE `id` = ?");
+
+            foreach ($legacyTvProds->fetchAll() as $tp) {
+                $tname = strtolower((string) ($tp['name'] ?? ''));
+                if (str_contains($tname, 'remote') || str_contains($tname, 'rimoti') || str_contains($tname, 'bracket')) {
+                    $targetTvCatId = $catIdsBySlug['tv-remotes'] ?? $legacyTvCatId;
+                } else {
+                    $targetTvCatId = $catIdsBySlug['tv'] ?? $legacyTvCatId;
+                }
+                if ($targetTvCatId !== $legacyTvCatId) {
+                    $updateTvProdCat->execute([$targetTvCatId, (int) $tp['id']]);
+                }
+            }
+
+            $remainingTv = (int) $pdo->query("SELECT COUNT(*) FROM `products` WHERE `category_id` = {$legacyTvCatId}")->fetchColumn();
+            if ($remainingTv === 0) {
+                $pdo->exec("DELETE FROM `categories` WHERE `id` = {$legacyTvCatId}");
             }
         }
 
