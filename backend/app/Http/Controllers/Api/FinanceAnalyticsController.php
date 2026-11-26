@@ -187,6 +187,15 @@ class FinanceAnalyticsController extends BaseApiController
             LIMIT 5
         ");
 
+        $lowStockRows = $lowStockStmt->fetchAll();
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+        if (!$isAdmin) {
+            foreach ($lowStockRows as &$lsRow) {
+                unset($lsRow['purchase_price']);
+            }
+            unset($lsRow);
+        }
+
         self::json([
             'success' => true,
             'kpis'    => [
@@ -211,7 +220,7 @@ class FinanceAnalyticsController extends BaseApiController
             ],
             'sales_trend'       => $salesTrend,
             'top_products'      => $topProductsStmt->fetchAll(),
-            'low_stock'         => $lowStockStmt->fetchAll(),
+            'low_stock'         => $lowStockRows,
             'recent_sales'       => $recentSalesStmt->fetchAll(),
             'recent_purchases'   => $recentPurchases,
             'purchased_products' => $purchasedProducts,

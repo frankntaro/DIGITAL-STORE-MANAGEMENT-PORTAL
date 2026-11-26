@@ -376,6 +376,14 @@ class OperationsSyncController extends BaseApiController
             WHERE p.`status` = 'active'
         ")->fetchAll();
 
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+        if (!$isAdmin) {
+            foreach ($products as &$pRow) {
+                unset($pRow['purchase_price'], $pRow['weighted_avg_cost'], $pRow['inventory_unit_cost']);
+            }
+            unset($pRow);
+        }
+
         $categories = $pdo->query("SELECT * FROM `categories` WHERE `status` = 'active'")->fetchAll();
 
         $customers = $pdo->query("

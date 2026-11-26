@@ -363,7 +363,7 @@ export function ProductsScreen({
               <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
                 <th className="py-3 px-4 text-left font-bold">{t('Product')}</th>
                 <th className="py-3 px-4 text-left font-bold">{t('Category')}</th>
-                <th className="py-3 px-4 text-right font-bold">{t('Purchase Cost')}</th>
+                {isAdmin && <th className="py-3 px-4 text-right font-bold">{t('Purchase Cost')}</th>}
                 <th className="py-3 px-4 text-right font-bold">{t('Selling Price')}</th>
                 <th className="py-3 px-4 text-center font-bold">{t('Stock')}</th>
                 <th className="py-3 px-4 text-center font-bold">{t('Status')}</th>
@@ -373,13 +373,13 @@ export function ProductsScreen({
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} className="py-8 text-center text-slate-400">
+                  <td colSpan={isAdmin ? 7 : 5} className="py-8 text-center text-slate-400">
                     {t('Loading products...')}
                   </td>
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} className="py-8 text-center text-slate-400">
+                  <td colSpan={isAdmin ? 7 : 5} className="py-8 text-center text-slate-400">
                     {t('No products found matching your criteria.')}
                   </td>
                 </tr>
@@ -445,9 +445,11 @@ export function ProductsScreen({
                         </div>
                       </td>
                       <td className="py-3 px-4 font-medium text-slate-700">{t(p.category_name)}</td>
-                      <td className="py-3 px-4 text-right text-slate-600">
-                        {formatUnitPrice(p.purchase_price, p.unit)}
-                      </td>
+                      {isAdmin && (
+                        <td className="py-3 px-4 text-right text-slate-600">
+                          {formatUnitPrice(p.purchase_price, p.unit)}
+                        </td>
+                      )}
                       <td className="py-3 px-4 text-right font-extrabold text-slate-900">
                         {formatUnitPrice(p.selling_price, p.unit)}
                       </td>
@@ -1002,6 +1004,9 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
       box_count: includeBoxes ? form.box_count : '',
       items_per_box: includeBoxes ? form.items_per_box : '',
     };
+    if (!isAdmin) {
+      delete payload.purchase_price;
+    }
     try {
       if (editingProduct) {
         await apiRequest(`/products/${editingProduct.id}`, {
@@ -1758,22 +1763,24 @@ export function AddEditProductScreen({ user, editingProduct, defaultCategoryId =
             />
           </div>
 
-          <div>
-            <label htmlFor="prod-cost" className="block text-xs font-bold text-slate-700 mb-1">
-              {isMeterUnit(form.unit) ? t('Purchase Price per Meter (TZS)') : t('Purchase Price (TZS)')}{' '}
-              <span className="text-red-500">*</span>
-            </label>
-            <input
-              id="prod-cost"
-              type="number"
-              min="0"
-              required
-              disabled={editingProduct && !canEditCost}
-              value={form.purchase_price}
-              onChange={(e) => setForm({ ...form, purchase_price: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs disabled:bg-slate-100"
-            />
-          </div>
+          {isAdmin && (
+            <div>
+              <label htmlFor="prod-cost" className="block text-xs font-bold text-slate-700 mb-1">
+                {isMeterUnit(form.unit) ? t('Purchase Price per Meter (TZS)') : t('Purchase Price (TZS)')}{' '}
+                <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="prod-cost"
+                type="number"
+                min="0"
+                required
+                disabled={editingProduct && !canEditCost}
+                value={form.purchase_price}
+                onChange={(e) => setForm({ ...form, purchase_price: e.target.value })}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs disabled:bg-slate-100"
+              />
+            </div>
+          )}
 
           <div>
             <label htmlFor="prod-price" className="block text-xs font-bold text-slate-700 mb-1">

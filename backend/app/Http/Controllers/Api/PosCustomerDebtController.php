@@ -57,8 +57,17 @@ class PosCustomerDebtController extends BaseApiController
             ORDER BY s.`id` DESC
         ");
         $stmt->execute($params);
+        $salesRows = $stmt->fetchAll();
 
-        self::json(['success' => true, 'sales' => $stmt->fetchAll()]);
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+        if (!$isAdmin) {
+            foreach ($salesRows as &$sRow) {
+                unset($sRow['total_cogs'], $sRow['gross_profit']);
+            }
+            unset($sRow);
+        }
+
+        self::json(['success' => true, 'sales' => $salesRows]);
     }
 
     public static function getSaleDetails(PDO $pdo, array $user, int $saleId): never
@@ -92,6 +101,16 @@ class PosCustomerDebtController extends BaseApiController
             WHERE si.`sale_id` = ?
         ");
         $itemsStmt->execute([$saleId]);
+        $saleItems = $itemsStmt->fetchAll();
+
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+        if (!$isAdmin) {
+            unset($sale['total_cogs'], $sale['gross_profit']);
+            foreach ($saleItems as &$siRow) {
+                unset($siRow['historical_unit_cost']);
+            }
+            unset($siRow);
+        }
 
         $repayStmt = $pdo->prepare("
             SELECT cp.*, u.`full_name` AS recorded_by_name
@@ -110,7 +129,7 @@ class PosCustomerDebtController extends BaseApiController
         self::json([
             'success'    => true,
             'sale'       => $sale,
-            'items'      => $itemsStmt->fetchAll(),
+            'items'      => $saleItems,
             'repayments' => $repayStmt->fetchAll(),
             'warranties' => $warStmt->fetchAll(),
             'settings'   => $settings,

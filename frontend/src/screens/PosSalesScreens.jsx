@@ -2049,7 +2049,7 @@ export function SaleDetailsScreen({ user, saleId, onBack, onNewSale }) {
                 <th className="py-3 px-4 text-left font-bold">{t('Product')}</th>
                 <th className="py-3 px-4 text-center font-bold">{t('Qty')}</th>
                 <th className="py-3 px-4 text-right font-bold">{t('Unit Price')}</th>
-                <th className="py-3 px-4 text-right font-bold">{t('Preserved Cost')}</th>
+                {isAdmin && <th className="py-3 px-4 text-right font-bold">{t('Preserved Cost')}</th>}
                 <th className="py-3 px-4 text-right font-bold">{t('Line Total')}</th>
               </tr>
             </thead>
@@ -2082,9 +2082,11 @@ export function SaleDetailsScreen({ user, saleId, onBack, onNewSale }) {
                   <td className="py-3 px-4 text-right">
                     {formatUnitPrice(item.unit_selling_price, item.unit || item.unit_snapshot)}
                   </td>
-                  <td className="py-3 px-4 text-right text-slate-500">
-                    {formatUnitPrice(item.historical_unit_cost, item.unit || item.unit_snapshot)}
-                  </td>
+                  {isAdmin && (
+                    <td className="py-3 px-4 text-right text-slate-500">
+                      {formatUnitPrice(item.historical_unit_cost, item.unit || item.unit_snapshot)}
+                    </td>
+                  )}
                   <td className="py-3 px-4 text-right font-extrabold text-slate-900">
                     {formatTZS(item.line_total)}
                   </td>

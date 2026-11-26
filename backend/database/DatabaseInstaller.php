@@ -7,7 +7,7 @@ use PDOException;
 
 class DatabaseInstaller
 {
-    private const SCHEMA_VERSION = '2026.11.25.revert-test-sales-and-sale-reversal-v1';
+    private const SCHEMA_VERSION = '2026.11.26.admin-only-buying-price-v1';
     private const PURGE_DEMO_MIGRATION = '2026_11_25_purge_demo_data_v1';
     private const REVERT_TEST_SALES_MIGRATION = '2026_11_25_revert_test_sales_v1';
     private static ?array $cachedConfig = null;
@@ -296,10 +296,11 @@ class DatabaseInstaller
             }
 
             // Unified Employee permissions:
-            // Purchases module (purchases.view, purchases.manage) and Stock Adjustments (inventory.adjust) are STRICTLY Admin-only.
+            // Purchases module (purchases.view, purchases.manage), Buying Price (products.edit_cost),
+            // and Stock Adjustments (inventory.adjust) are STRICTLY Admin-only.
             $unifiedPerms = [
                 'dashboard.view',
-                'products.view', 'products.manage', 'products.edit_cost', 'categories.manage',
+                'products.view', 'products.manage', 'categories.manage',
                 'suppliers.view', 'suppliers.manage', 'suppliers.pay',
                 'inventory.view',
                 'pos.sell', 'pos.discount', 'sales.view',
@@ -330,7 +331,7 @@ class DatabaseInstaller
 
             $delOldUr = $pdo->prepare("DELETE FROM `user_roles` WHERE `user_id` = ?");
             $insUr = $pdo->prepare("INSERT IGNORE INTO `user_roles` (`user_id`, `role_id`) VALUES (?, ?)");
-            $adminOnlySlugs = ['inventory.adjust', 'purchases.view', 'purchases.manage'];
+            $adminOnlySlugs = ['inventory.adjust', 'purchases.view', 'purchases.manage', 'products.edit_cost'];
             $delUp = $pdo->prepare("DELETE FROM `user_permissions` WHERE `user_id` = ? AND `permission_id` = ?");
 
             foreach ($nonAdmins as $uid) {
@@ -856,10 +857,10 @@ class DatabaseInstaller
             foreach ($permIds as $slug => $pid) {
                 $rpStmt->execute([$roleIds['owner'], $pid]);
             }
-            // Unified Employee permissions (Purchases & Stock Adjustments strictly Admin-only)
+            // Unified Employee permissions (Purchases, Buying Price & Stock Adjustments strictly Admin-only)
             $unifiedEmployeePerms = [
                 'dashboard.view',
-                'products.view', 'products.manage', 'products.edit_cost', 'categories.manage',
+                'products.view', 'products.manage', 'categories.manage',
                 'suppliers.view', 'suppliers.manage', 'suppliers.pay',
                 'inventory.view',
                 'pos.sell', 'pos.discount', 'sales.view',

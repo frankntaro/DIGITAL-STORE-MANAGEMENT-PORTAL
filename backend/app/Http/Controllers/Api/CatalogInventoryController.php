@@ -186,8 +186,17 @@ class CatalogInventoryController extends BaseApiController
             ORDER BY is_newly_purchased DESC, last_purchased_at DESC, p.`id` DESC
         ");
         $stmt->execute($params);
+        $products = $stmt->fetchAll();
 
-        self::json(['success' => true, 'products' => $stmt->fetchAll()]);
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+        if (!$isAdmin) {
+            foreach ($products as &$pRow) {
+                unset($pRow['purchase_price'], $pRow['weighted_avg_cost'], $pRow['inventory_unit_cost']);
+            }
+            unset($pRow);
+        }
+
+        self::json(['success' => true, 'products' => $products]);
     }
 
     private static function normalizeCapacitySpec(mixed $raw): ?string
@@ -275,11 +284,21 @@ class CatalogInventoryController extends BaseApiController
             LIMIT 50
         ");
         $movStmt->execute([$productId]);
+        $movements = $movStmt->fetchAll();
+
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+        if (!$isAdmin) {
+            unset($product['purchase_price'], $product['weighted_avg_cost'], $product['inventory_unit_cost']);
+            foreach ($movements as &$mRow) {
+                unset($mRow['unit_cost']);
+            }
+            unset($mRow);
+        }
 
         self::json([
             'success'   => true,
             'product'   => $product,
-            'movements' => $movStmt->fetchAll(),
+            'movements' => $movements,
         ]);
     }
 
@@ -302,7 +321,8 @@ class CatalogInventoryController extends BaseApiController
         $boxCount = self::normalizePositiveIntOrNull($data['box_count'] ?? null);
         $itemsPerBox = self::normalizePositiveIntOrNull($data['items_per_box'] ?? null);
         $description = trim((string) ($data['description'] ?? '')) ?: null;
-        $purchasePrice = (float) ($data['purchase_price'] ?? 0);
+        $isAdmin = in_array('owner', $user['role_slugs'] ?? [], true);
+        $purchasePrice = $isAdmin ? max(0.0, (float) ($data['purchase_price'] ?? 0)) : 0.0;
         $sellingPrice = (float) ($data['selling_price'] ?? 0);
         $rawUnit = strtolower(trim((string) ($data['unit'] ?? '')));
         $isCarpetName = str_contains(strtolower($name), 'carpet') || str_contains(strtolower($name), 'zulia');
